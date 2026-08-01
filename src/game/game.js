@@ -28,6 +28,7 @@ import { ALL_TRACKS } from '../world/tracks/index.js';
 import { MODE_RIGS } from '../config/camera.js';
 import { OPEN_WORLD, PLAYER } from '../config/gameplay.js';
 import { ACTIVE_PROFILE } from '../config/tuning.js';
+import { settings } from '../config/settings.js';
 import { clamp01 } from '../core/mathx.js';
 
 export class Game {
@@ -109,6 +110,12 @@ export class Game {
     globalThis.addEventListener('resize', this._boundResize);
     this._onResize();
     this._wireGlobalKeys();
+
+    // Player settings, restored from localStorage and applied to everything
+    // that was just built. Must come after the renderer, audio and camera exist.
+    settings.load();
+    events.on('settings:changed', ({ id, value }) => this._applySetting(id, value));
+    settings.applyAll();
 
     // Remember what the current mode was entered with, so pause → restart can
     // rebuild it exactly.
@@ -311,32 +318,100 @@ export class Game {
     });
   }
 
+  /**
+   * Escape. Opens the pause menu, and keeps re-opening it after the settings
+   * panel closes so the player can dip in and out without losing their place.
+   */
   async togglePause() {
     if (this._pausing) return;
     if (this.loop.paused) {
       this.loop.setPaused(false);
       return;
     }
-    // Never pause into a modal that is already showing something.
-    if (this.ui.screens.isModalOpen?.()) return;
+    // `isModalOpen` is a getter, not a method — do not add parentheses.
+    if (this.ui.screens.isModalOpen) return;
+
     this._pausing = true;
     this.loop.setPaused(true);
     this.audio.setDucking(0.8);
     try {
-      const choice = await this.ui.screens.showPause();
-      if (choice === 'restart' && this.modes.currentName) {
-        const name = this.modes.currentName;
-        this.loop.setPaused(false);
-        await this.modes.switchTo(name, this._lastModeParams || {});
-      } else if (choice === 'quit') {
-        events.emit('game:quit', {});
-        this.loop.setPaused(false);
-      } else {
-        this.loop.setPaused(false);
+      for (;;) {
+        const choice = await this.ui.screens.showPause();
+
+        if (choice === 'settings') {
+          // Live: every control applies immediately, so you can hear the
+          // volume and see the brightness while you drag them.
+          await this.ui.settingsMenu.show();
+          continue; // back to the pause menu
+        }
+
+        if (choice === 'restart' && this.modes.currentName) {
+          const name = this.modes.currentName;
+          this.loop.setPaused(false);
+          await this.modes.switchTo(name, this._lastModeParams || {});
+        } else if (choice === 'mainMenu') {
+          // A full reload is the honest way back to the title: the intro
+          // director has already detached itself by the time most players see
+          // this menu, and half-rebuilding it would be a bug farm.
+          events.emit('game:mainMenu', {});
+          globalThis.location.href = globalThis.location.pathname;
+          return;
+        } else {
+          this.loop.setPaused(false);
+        }
+        break;
       }
     } finally {
       this.audio.setDucking(0);
       this._pausing = false;
+    }
+  }
+
+  // -- settings -------------------------------------------------------------
+
+  /**
+   * One place where a player-facing option becomes a thing that happens.
+   * Adding an option is an entry in `SETTINGS_SCHEMA` plus a `case` here.
+   */
+  _applySetting(id, value) {
+    const r = this.renderer;
+    switch (id) {
+      case 'muted': this.audio.setMuted(value); break;
+      case 'masterVolume': this.audio.setMasterVolume(value); break;
+      case 'musicVolume':
+        this.audio.setBusVolume('music', value);
+        this.audio.setBusVolume('ambience', value * settings.get('ambienceVolume'));
+        break;
+      case 'ambienceVolume':
+        this.audio.setBusVolume('ambience', value * settings.get('musicVolume'));
+        break;
+      case 'sfxVolume':
+        this.audio.setBusVolume('sfx', value);
+        this.audio.setBusVolume('siren', value);
+        this.audio.setBusVolume('tyres', value);
+        break;
+      case 'engineVolume': this.audio.setBusVolume('engine', value); break;
+
+      case 'worldLight': r.setOverride('lightScale', value); break;
+      case 'brightness': r.setOverride('brightness', value); break;
+      case 'contrast': r.setOverride('contrast', value); break;
+      case 'scanlines': r.setOverride('scanlines', value); break;
+      case 'vignette': r.setOverride('vignette', value); break;
+      case 'chromatic': r.setOverride('chromatic', value); break;
+
+      case 'renderPreset':
+        if (r.preset.name !== value) r.setRenderPreset(value);
+        break;
+
+      case 'cameraRig':
+        // Don't yank the camera during a cutscene or a cockpit-locked moment.
+        if (this.camera.rig.type === 'follow') this.camera.setRig(value);
+        break;
+      case 'cameraShake':
+        this.camera.globalShakeScale = value;
+        break;
+      default:
+        break;
     }
   }
 

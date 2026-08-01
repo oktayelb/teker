@@ -25,6 +25,7 @@ import { resolveTheme, hexToCss, DEFAULT_THEME } from '../config/style.js';
 import { Hud } from './hud.js';
 import { Screens } from './screens.js';
 import { Subtitles } from './subtitles.js';
+import { SettingsMenu } from './settingsMenu.js';
 
 export { createLogo, createWordmark } from './logo.js';
 export { Hud } from './hud.js';
@@ -71,6 +72,7 @@ export class UI {
     this._hud = new Hud(null);
     this._screens = new Screens(null);
     this._subtitles = new Subtitles(null);
+    this._settingsMenu = new SettingsMenu(null);
 
     this._subs = null;
     this._theme = null;
@@ -90,6 +92,10 @@ export class UI {
   }
   get subtitles() {
     return this._subtitles;
+  }
+  /** The options panel behind Escape → AYARLAR. */
+  get settingsMenu() {
+    return this._settingsMenu;
   }
   get glitch() {
     return this._glitch;
@@ -130,6 +136,9 @@ export class UI {
     this._hud.mount();
     this._screens.mount();
     this._subtitles.mount();
+    // Mounted on the root, not the stage: the settings panel must stay readable
+    // and un-jittered even while the rest of the UI is glitching.
+    this._settingsMenu.mount(root);
 
     this.applyTheme(this._theme?.name || DEFAULT_THEME);
     this.setGlitch(this._glitch);
@@ -204,6 +213,7 @@ export class UI {
     this._hud.applyTheme(theme);
     this._screens.applyTheme(theme);
     this._subtitles.applyTheme(theme);
+    this._settingsMenu.applyTheme(theme);
     return this;
   }
 

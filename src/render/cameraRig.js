@@ -55,6 +55,9 @@ export class CameraRig {
     this._freeYaw = 0;
     this._freePitch = -0.15;
 
+    /** Player-facing multiplier from the settings menu, on top of each rig's own. */
+    this.globalShakeScale = 1;
+
     /** Extra offsets other systems can push (e.g. a scripted push-in). */
     this.positionBias = new THREE.Vector3();
     this.lookBias = new THREE.Vector3();
@@ -112,7 +115,7 @@ export class CameraRig {
   shake(source, scale = 1) {
     const def = SHAKE_SOURCES[source] || SHAKE_SOURCES.collision;
     this._shakes.push({
-      amplitude: def.amplitude * scale * (this.rig.shakeScale ?? 1),
+      amplitude: def.amplitude * scale * (this.rig.shakeScale ?? 1) * this.globalShakeScale,
       frequency: def.frequency,
       decay: def.decay,
       phase: Math.random() * 100,
@@ -189,8 +192,11 @@ export class CameraRig {
 
     // --- desired position ---------------------------------------------------
     const lateralG = clamp((t.localAccel?.x ?? 0) / (t.tuning?.gravity ?? 24), -2, 2);
+    // `applyAxisAngle(Y, yaw)` maps local +X onto (cos, 0, -sin), which is the
+    // driver's LEFT. Negate so a positive `offset.x` in a rig preset means what
+    // it reads as: move the camera to the right.
     _offset.set(
-      R.offset.x - lateralG * R.lateralLead,
+      -(R.offset.x - lateralG * R.lateralLead),
       R.offset.y - R.speedDrop * speedRatio,
       R.offset.z - R.speedPullback * speedRatio
     );
@@ -216,7 +222,7 @@ export class CameraRig {
     }
 
     // --- aim ----------------------------------------------------------------
-    _look.set(R.lookAt.x, R.lookAt.y, R.lookAt.z).applyAxisAngle(_up, this._yaw);
+    _look.set(-R.lookAt.x, R.lookAt.y, R.lookAt.z).applyAxisAngle(_up, this._yaw);
     _look.add(t.position).add(this.lookBias);
     if (snap) this._lookAt.copy(_look);
     else {
@@ -290,7 +296,8 @@ export class CameraRig {
       const fwd = _tmp
         .set(Math.sin(this._freeYaw) * Math.cos(this._freePitch), Math.sin(this._freePitch), Math.cos(this._freeYaw) * Math.cos(this._freePitch))
         .normalize();
-      const right = _desired.set(Math.cos(this._freeYaw), 0, -Math.sin(this._freeYaw));
+      // forward × up, so D strafes right. Same convention as Vehicle#right.
+      const right = _desired.set(-Math.cos(this._freeYaw), 0, Math.sin(this._freeYaw));
       this._position.addScaledVector(fwd, input.throttle * speed * dt);
       this._position.addScaledVector(fwd, -input.brake * speed * dt);
       this._position.addScaledVector(right, input.steer * speed * dt);

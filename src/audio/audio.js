@@ -893,6 +893,31 @@ export class AudioEngine {
     ramp(this._master.gain, this._muted ? 0 : this._volume, this._now, AUDIO_CONFIG.MASTER.volumeGlideSec);
   }
 
+  /**
+   * Scale one mix layer, relative to its `MASTER.busVolumes` balance.
+   * A settings menu changes this; the mix itself stays in AUDIO_CONFIG.
+   * @param {'engine'|'tyres'|'sfx'|'siren'|'music'|'ambience'|'glitch'} name
+   * @param {number} scale 0..1 (values above 1 are allowed but will clip sooner)
+   */
+  setBusVolume(name, scale) {
+    this._busScale = this._busScale || {};
+    this._busScale[name] = scale;
+    const base = AUDIO_CONFIG.MASTER.busVolumes[name];
+    const node = this._bus?.[name];
+    // `_live` and `_now` are getters, not methods.
+    if (base === undefined || !node || !this._live) return;
+    node.gain.setTargetAtTime(
+      Math.max(0, base * scale),
+      this._now,
+      AUDIO_CONFIG.MASTER.volumeGlideSec
+    );
+  }
+
+  /** Current scale for a layer, 1 if never set. */
+  getBusVolume(name) {
+    return this._busScale?.[name] ?? 1;
+  }
+
   setDucking(amount01) {
     this._duck = clamp01(amount01);
     if (!this._duckBus) return;

@@ -214,9 +214,11 @@ export class ChaseSystem {
       const d = c.vehicle.position.distanceTo(t.position);
       _toPlayer.subVectors(c.vehicle.position, t.position).normalize();
       // Pan relative to where the camera is looking, not where the car points.
+      // Screen-right = forward × up. Getting this backwards puts the siren in
+      // the wrong ear, which is worse than no panning at all.
       const camYaw = g.camera._yaw;
-      const rightX = Math.cos(camYaw);
-      const rightZ = -Math.sin(camYaw);
+      const rightX = -Math.cos(camYaw);
+      const rightZ = Math.sin(camYaw);
       const pan = clamp(_toPlayer.x * rightX + _toPlayer.z * rightZ, -1, 1);
       g.audio.updateSiren(c.id, { distance: d, pan });
     }

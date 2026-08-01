@@ -32,6 +32,7 @@ const FRAG = /* glsl */ `
 
   uniform float uLift;
   uniform float uGain;
+  uniform float uContrast;
   uniform float uSaturation;
   uniform vec3  uTint;
 
@@ -109,6 +110,7 @@ const FRAG = /* glsl */ `
 
     // -- colour grade -------------------------------------------------------
     color = (color + uLift) * uGain;
+    color = (color - 0.5) * uContrast + 0.5;
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
     color = mix(vec3(luma), color, uSaturation);
     color *= uTint;
@@ -153,6 +155,7 @@ export class PostFx {
       uChroma: { value: preset.chromaticAberration },
       uLift: { value: theme.grade.lift },
       uGain: { value: theme.grade.gain },
+      uContrast: { value: 1 },
       uSaturation: { value: theme.grade.saturation },
       uTint: { value: new THREE.Color(theme.grade.tint) },
       uGlitch: { value: 0 },

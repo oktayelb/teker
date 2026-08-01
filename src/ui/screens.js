@@ -42,9 +42,10 @@ const DEFAULT_TITLE_ITEMS = [
 ];
 
 const PAUSE_ITEMS = [
-  { id: 'resume', label: 'RESUME' },
-  { id: 'restart', label: 'RESTART' },
-  { id: 'quit', label: 'QUIT' },
+  { id: 'resume', label: 'DEVAM ET' },
+  { id: 'settings', label: 'AYARLAR' },
+  { id: 'restart', label: 'YENİDEN BAŞLA' },
+  { id: 'mainMenu', label: 'ANA MENÜ' },
 ];
 
 /** Characters per second for the system typewriter. Deliberately unhurried. */
@@ -131,7 +132,7 @@ export class Screens {
     // -- pause --------------------------------------------------------------
     this._pause = el('div', 'tk-screen tk-screen-dim');
     const pauseCard = el('div', 'tk-results tk-panel');
-    pauseCard.append(el('h2', null, 'PAUSED'));
+    pauseCard.append(el('h2', null, 'DURAKLADI'));
     this._pauseMenu = el('nav', 'tk-menu');
     pauseCard.append(this._pauseMenu);
     this._pause.append(pauseCard);
@@ -327,10 +328,11 @@ export class Screens {
   // -------------------------------------------------------------------------
 
   /** @returns {Promise<'resume'|'restart'|'quit'>} */
-  showPause() {
+  showPause(opts = {}) {
     if (!this.el) return Promise.resolve('resume');
+    const items = Array.isArray(opts.items) && opts.items.length ? opts.items : PAUSE_ITEMS;
     return new Promise((resolve) => {
-      this._openMenu(this._pause, this._pauseMenu, PAUSE_ITEMS, 'pause', resolve, 'resume');
+      this._openMenu(this._pause, this._pauseMenu, items, 'pause', resolve, 'resume');
     });
   }
 

@@ -244,6 +244,42 @@ ok(
 );
 ok('holding brake past zero reverses', test.longSpeed < -1, `${test.longSpeed.toFixed(1)} m/s`);
 
+// -- which way is right? -----------------------------------------------------
+// Mirrored steering is not a subtle bug to play but it IS a subtle bug to read,
+// because every sign in the file is individually plausible. Pin it down.
+{
+  const car = new Vehicle({ profile: 'hatchback', world: flat, id: 'steer' });
+  car.reset(new THREE.Vector3(0, 0, 0), 0); // heading 0 → facing +Z
+  car.velocity.set(0, 0, 25);
+  simulate(car, 120 * 2, () => ({ throttle: 0.4, brake: 0, steer: 1, handbrake: 0 }));
+
+  // Camera sits behind on -Z looking toward +Z, so screen-right is world -X.
+  ok(
+    'steer +1 turns the car to the driver\'s right',
+    car.position.x < -2,
+    `moved to x=${car.position.x.toFixed(1)} (screen-right is -x)`
+  );
+  const fresh = new Vehicle({ profile: 'hatchback', world: flat, id: 'basis' });
+  fresh.reset(new THREE.Vector3(0, 0, 0), 0);
+  ok(
+    '...and right is forward × up at heading 0',
+    fresh.right.x < -0.99 && Math.abs(fresh.forward.z - 1) < 0.01,
+    `forward=(${fresh.forward.x.toFixed(2)}, 0, ${fresh.forward.z.toFixed(2)}) right=(${fresh.right.x.toFixed(2)}, 0, ${fresh.right.z.toFixed(2)})`
+  );
+
+  const mirror = new Vehicle({ profile: 'hatchback', world: flat, id: 'steer2' });
+  mirror.reset(new THREE.Vector3(0, 0, 0), 0);
+  mirror.velocity.set(0, 0, 25);
+  simulate(mirror, 120 * 2, () => ({ throttle: 0.4, brake: 0, steer: -1, handbrake: 0 }));
+  ok('steer -1 turns left, symmetrically', mirror.position.x > 2 && Math.abs(mirror.position.x + car.position.x) < 0.5,
+    `x=${mirror.position.x.toFixed(1)} vs ${car.position.x.toFixed(1)}`);
+
+  // And the keyboard has to agree: D is `right`, which must produce steer > 0.
+  const { BINDINGS } = await import('../src/core/input.js');
+  ok('D is bound to right, A to left', BINDINGS.right.includes('KeyD') && BINDINGS.left.includes('KeyA'));
+  ok('arrows agree', BINDINGS.right.includes('ArrowRight') && BINDINGS.left.includes('ArrowLeft'));
+}
+
 // -- grip: the same corner on tarmac and on ice ------------------------------
 function corneringRadius(surfaceId) {
   const ground = {
@@ -288,7 +324,9 @@ function playerModel(track, { reaction = 0.35, lookahead = 18 } = {}) {
       const dx = goal.x - v.position.x;
       const dz = goal.z - v.position.z;
       const angle = Math.atan2(dx, dz) - v.heading;
-      steer = Math.max(-1, Math.min(1, Math.atan2(Math.sin(angle), Math.cos(angle)) * 2.0));
+      // Negated: `angle` is a heading delta, `steer` is positive-is-right, and
+      // heading decreases when turning right. Same rule as AiDriver#_steerTo.
+      steer = Math.max(-1, Math.min(1, -Math.atan2(Math.sin(angle), Math.cos(angle)) * 2.0));
     }
     // Delayed perception of the slide.
     history.push(v.slip);

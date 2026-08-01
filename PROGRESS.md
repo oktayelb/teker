@@ -46,7 +46,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 
-**All phases complete.** `npm test` → 92/92, and it renders. See `README.md` for
+**All phases complete.** `npm test` → 98/98, and it renders. See `README.md` for
 how to tune it and where to build the next act.
 
 ## Status log
@@ -74,7 +74,12 @@ how to tune it and where to build the next act.
 - **P11 / P12** — Built in parallel by subagents against fixed interfaces.
   Audio is 100% synthesised; UI is vanilla DOM. No asset files anywhere.
 - **P13** — `IntroDirector` + `beats.js`. Asserted deletable by the test suite.
-- **P14** — Tuning panel on `` ` ``, pause on Esc, README, `tools/smoke.mjs`.
+- **P14** — Tuning panel on `` ` `` (designer), settings menu on Esc (player),
+  README, `tools/smoke.mjs`, `tools/inspect.mjs`.
+- **P15** — Settings: schema in `src/config/settings.js`, generic renderer in
+  `src/ui/settingsMenu.js`, effects in `Game#_applySetting`, persisted to
+  localStorage. Sound / light / video / camera. Adding an option = schema entry
+  + one `case`.
 
 ## Bugs found so far (do not reintroduce)
 
@@ -96,10 +101,18 @@ how to tune it and where to build the next act.
    Use `GeomBuilder.addQuadFacing()` for anything that must face a known way.
 7. **Light intensities were ~3x too low.** three r155+ is physically correct and
    Lambert divides irradiance by PI. Old-style intensities render near-black.
+8. **`right` pointed at the driver's LEFT.** `(cos h, 0, -sin h)` instead of
+   `forward × up = (-cos h, 0, sin h)`. Mirrored the whole game at once —
+   steering, body roll, camera lean, siren panning — with every individual sign
+   still looking plausible. Asserted now: steer +1 must move the car toward -x.
+9. **`AudioEngine#_live` / `#_now` are getters, not methods**, and
+   `Screens#isModalOpen` likewise. Calling them with `()` throws. When reaching
+   into a module someone else wrote, check the member kind first.
 
 ## Tooling note
 
 `npm run inspect -- "?scene=race1"` boots the real game in headless Chromium,
 prints every console error / 404 / shader failure, dumps a diagnostic snapshot
-and screenshots to `tools/out/`. Bugs 4–7 above were all invisible to `npm test`
-and obvious within one run of this.
+and screenshots to `tools/out/`. Bugs 4–7 and 9 were all invisible to `npm test`
+and obvious within one run of this. `tools/menu-check.mjs` does the same for the
+pause/settings flow, including driving the car to check which way it steers.

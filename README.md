@@ -50,7 +50,25 @@ download.
 ### Keys
 
 `W A S D` / arrows drive · `Space` handbrake · `C` cycle camera · `V` look behind
-· `R` respawn (races only) · `H` horn · `` ` `` tuning panel · `Esc` pause
+· `R` respawn (races only) · `H` horn · `` ` `` tuning panel · `Esc` pause + options
+
+---
+
+## Two menus, and which one you want
+
+**`Esc` — the player's menu.** Sound (master, music, effects, engine, ambience),
+light (world light, screen brightness, contrast), video (PSX/N64/Clean, scanlines,
+vignette, chroma), camera and shake. Plus Resume / Restart / Main Menu. Everything
+applies live and persists to localStorage.
+
+Options are defined in `src/config/settings.js` as a schema. `src/ui/settingsMenu.js`
+renders whatever is listed there and knows nothing about what any of it does;
+`Game#_applySetting` decides that. **Adding an option is one schema entry plus one
+`case`** — the menu never needs touching.
+
+**`` ` `` — the designer's menu.** The live tuning panel: raw vehicle physics,
+camera rig internals, global pace. Not for players, doesn't persist, and has a
+`Copy values` button that hands you JSON to paste back into `src/config/`.
 
 ---
 
@@ -107,6 +125,26 @@ Rigs are declarative. The one field worth understanding is `velocityFollow`: at
 0 the camera is welded behind the car's nose and drifts are invisible; at 1 it
 trails the car's actual velocity and you watch the car go sideways across the
 screen. 0.6 reads best. Everything else is offsets and stiffnesses.
+
+### Which way is right?
+
+Worth knowing before you touch a sign anywhere in `vehicle.js`, `ai.js` or
+`cameraRig.js`:
+
+```
+forward = (sin h, 0, cos h)     — matches mesh.rotation.y = heading
+right   = forward × up          = (-cos h, 0, sin h)
+```
+
+`right` is the **driver's** right, which is also screen-right with the camera
+behind the car. It is *not* `(cos h, 0, -sin h)` — that is the driver's left, and
+using it silently mirrors the entire game: steering, body roll, camera lean and
+siren panning all invert together, and each individual sign still looks plausible.
+
+Because `forward` rotates toward `-right` as `h` grows, **turning right decreases
+the heading**. So `command.steer > 0` means right, and anything working in
+heading-space (like `AiDriver#_steerTo`) has to negate. `npm test` pins this down
+with a car, a steering input and an assertion about which way it ended up.
 
 ---
 

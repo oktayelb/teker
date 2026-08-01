@@ -112,6 +112,21 @@ export class RetroRenderer {
     this.internalWidth = 1;
     this.internalHeight = 1;
 
+    /**
+     * Player-facing overrides from the settings menu. These are applied *after*
+     * the theme and the render preset, every time either changes, so a theme
+     * cross-fade or a preset switch cannot silently undo what the player chose.
+     * Scale-type entries multiply the preset/theme value; 1 means "unchanged".
+     */
+    this.overrides = {
+      lightScale: 1,
+      brightness: 1,
+      contrast: 1,
+      scanlines: 1,
+      vignette: 1,
+      chromatic: 1,
+    };
+
     /** Theme transition state. */
     this._themeFrom = null;
     this._themeTo = null;
@@ -225,6 +240,35 @@ export class RetroRenderer {
     this.materials.applyTheme(theme);
     this.materials.setSunDirection(this.sun.position);
     this.postfx.applyTheme(theme);
+    this._applyOverrides();
+  }
+
+  /**
+   * Re-assert the player's settings on top of whatever the theme or preset just
+   * wrote. Call after ANY change to either.
+   */
+  _applyOverrides() {
+    const o = this.overrides;
+    const t = this.theme;
+    this.sun.intensity = t.light.intensity * o.lightScale;
+    this.hemi.intensity = t.light.ambientIntensity * o.lightScale;
+    const u = this.postfx.uniforms;
+    u.uGain.value = t.grade.gain * o.brightness;
+    u.uContrast.value = o.contrast;
+    // Multipliers on the preset, so a preset with no scanlines stays clean.
+    u.uScanlines.value = this.preset.scanlines * o.scanlines;
+    u.uVignette.value = this.preset.vignette * o.vignette;
+    u.uChroma.value = this.preset.chromaticAberration * o.chromatic;
+  }
+
+  /**
+   * @param {keyof RetroRenderer['overrides']} key
+   * @param {number|null} value
+   */
+  setOverride(key, value) {
+    if (!(key in this.overrides)) return;
+    this.overrides[key] = value;
+    this._applyOverrides();
   }
 
   /**
@@ -255,6 +299,7 @@ export class RetroRenderer {
     this.postfx.applyPreset(this.preset);
     this.renderer.shadowMap.enabled = this.preset.shadows;
     this.resize(this.width, this.height);
+    this._applyOverrides();
   }
 
   // -- narrative effects ----------------------------------------------------

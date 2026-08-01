@@ -231,16 +231,20 @@ export class AiDriver {
   }
 
   _steerTo(point, c) {
+    // `angle` is how far the HEADING must change; `steer` is positive-is-right.
+    // Heading decreases when turning right (see the convention note in
+    // vehicle.js), so the two are opposite in sign.
     const angle = this._angleTo(point);
     const v = this.vehicle;
     // Counter-steer when the car is already sliding — the same instinct a
-    // player has, and it stops the AI spinning on the icy sections.
-    const slideCorrection = -v.latSpeed * 0.055 * this.skill;
-    c.steer = clamp(angle * AI_TUNING.steerGain + slideCorrection, -1, 1);
+    // player has, and it stops the AI spinning on the icy sections. If the car
+    // is travelling out to its right (latSpeed > 0), steer right, into it.
+    const slideCorrection = v.latSpeed * 0.055 * this.skill;
+    c.steer = clamp(-angle * AI_TUNING.steerGain + slideCorrection, -1, 1);
 
     if (Math.abs(angle) > AI_TUNING.spinOutAngle && v.speed < 6) {
       c.brake = 1;
-      c.steer = Math.sign(angle) * -1;
+      c.steer = Math.sign(angle);
     }
   }
 

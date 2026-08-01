@@ -20,8 +20,20 @@
  * model (`yaw = v/L * tan(steer)`), which is what makes the car unable to turn
  * while stationary without any special-casing.
  *
- * Coordinate convention: heading 0 faces +Z, and forward = (sin h, 0, cos h),
- * which matches three.js's `mesh.rotation.y = heading` exactly.
+ * COORDINATE CONVENTION — read this before touching any sign in here.
+ *
+ *   forward = (sin h, 0, cos h)   — matches `mesh.rotation.y = heading` exactly
+ *   right   = forward × up        = (-cos h, 0, sin h)
+ *
+ * `right` is the DRIVER'S right, which is also the player's screen-right when
+ * the camera is behind the car. It is not `(cos h, 0, -sin h)` — that is the
+ * driver's *left*, and using it silently mirrors the whole game: the car
+ * steers the wrong way, body roll leans the wrong way, and sirens pan to the
+ * wrong side. Everything downstream of `right` inherits its sign.
+ *
+ * Because forward rotates toward `-right` as `h` increases, turning right
+ * requires the heading to DECREASE. That is why the steering term below is
+ * negated: `command.steer > 0` means "turn right", always.
  */
 
 import * as THREE from 'three';
@@ -172,7 +184,8 @@ export class Vehicle {
     const s = Math.sin(this.heading);
     const c = Math.cos(this.heading);
     this.forward.set(s, 0, c);
-    this.right.set(c, 0, -s);
+    // right = forward × up. See the convention note at the top of this file.
+    this.right.set(-c, 0, s);
   }
 
   _sampleGround() {
@@ -314,9 +327,12 @@ export class Vehicle {
     // car naturally refuses to rotate when it is not moving.
     const wheelbase = T.halfExtents.z * 1.55;
     const steerAuthority = this.grounded ? 1 : T.airSteerScale;
+    // `targetYaw` is a HEADING rate. Steering right (positive) must decrease the
+    // heading, because forward rotates toward the driver's *left* as h grows —
+    // hence the leading minus. See the convention note at the top of the file.
     let targetYaw = 0;
     if (Math.abs(vLong) > T.minTurnSpeed) {
-      targetYaw = (vLong / wheelbase) * Math.tan(this.steerAngle) * T.turnRate * steerAuthority;
+      targetYaw = -(vLong / wheelbase) * Math.tan(this.steerAngle) * T.turnRate * steerAuthority;
     }
 
     // Stability assist nudges the nose toward where the car is actually going.
