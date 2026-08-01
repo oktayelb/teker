@@ -46,6 +46,8 @@ const _gravityVec = new THREE.Vector3();
 const _slope = new THREE.Vector3();
 const _tiltQuat = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
+const _probe = new THREE.Vector3();
+const _hitNormal = new THREE.Vector3();
 
 /** Commands a driver (human or AI) hands to a vehicle. */
 export function createDriveCommand() {
@@ -108,6 +110,9 @@ export class Vehicle {
      * point of the whole game, expressed as one boolean.
      */
     this.ignoreSurfaces = false;
+    /** True for the car the human is driving. Used to decide whose crashes
+     *  shake the camera. */
+    this.isPlayer = false;
 
     // -- render interpolation ----------------------------------------------
     this._prevPosition = new THREE.Vector3();
@@ -124,6 +129,27 @@ export class Vehicle {
 
     this._collisionCooldown = 0;
     this._wasGrounded = true;
+
+    // -- collision shape ----------------------------------------------------
+    // A car is 1.8m wide and 4.1m long. One circle cannot be both, and a single
+    // circle sized to the LENGTH (which this used to do) makes the car behave
+    // as if it were 3.5m wide — you clip barriers while still comfortably on
+    // the tarmac, and the boxes feel invisible because they are not where you
+    // are being stopped.
+    //
+    // Three circles down the centreline approximate a capsule: correct width,
+    // correct length, and it costs three cheap grid lookups.
+    const T = this.tuning;
+    this.collisionRadius = T.halfExtents.x * 1.04;
+    const reach = T.halfExtents.z - this.collisionRadius;
+    /** Local +Z offsets of each probe, rear to front. */
+    this.collisionProbes = [-reach, 0, reach];
+    this.collisionHeight = T.halfExtents.y * 2;
+  }
+
+  /** World position of collision probe `i`. */
+  probePosition(i, out = _probe) {
+    return out.copy(this.position).addScaledVector(this.forward, this.collisionProbes[i]);
   }
 
   get speed() {
@@ -430,9 +456,20 @@ export class Vehicle {
 
   _resolveCollisions(dt) {
     if (!this.world?.collide) return;
-    const radius = Math.max(this.tuning.halfExtents.x, this.tuning.halfExtents.z) * 0.85;
-    const hit = this.world.collide(this.position, radius);
-    if (!hit) return;
+
+    // Test each probe and keep the deepest overlap. Resolving all of them would
+    // double-count a corner shared between two probes and fire the car away.
+    let best = null;
+    let bestProbe = 0;
+    for (let i = 0; i < this.collisionProbes.length; i++) {
+      const hit = this.world.collide(this.probePosition(i), this.collisionRadius);
+      if (hit && (!best || hit.depth > best.depth)) {
+        best = { normal: _hitNormal.copy(hit.normal), depth: hit.depth };
+        bestProbe = this.collisionProbes[i];
+      }
+    }
+    if (!best) return;
+    const hit = best;
 
     const T = this.tuning;
     // Push out of the obstacle.
@@ -460,6 +497,13 @@ export class Vehicle {
       }
       // A glancing blow should also scrub some rotation, or hits feel weightless.
       this.yawRate *= 1 - 0.5 * headOn;
+
+      // Hitting a wall with the nose should turn the car. Which probe made
+      // contact tells us where the impulse was applied, and the lever arm about
+      // the centre of mass does the rest — clipping a barrier with a front
+      // corner now spins you in, which is what you expect it to do.
+      const lever = hit.normal.dot(this.right) * bestProbe;
+      this.yawRate -= lever * Math.abs(into) * 0.05;
     }
   }
 

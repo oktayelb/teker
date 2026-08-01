@@ -420,6 +420,180 @@ ok(
   `stayed within ${rival.maxOff.toFixed(1)}m of the ribbon`
 );
 
+// -- oriented boxes -----------------------------------------------------------
+// A guardrail is a long thin box laid ALONG the track. If its local frame is
+// built the wrong way round it is correct at multiples of 90° and silently
+// rotated everywhere between, so on a curve the rail becomes a wall across the
+// road. The barrier is drawn in the right place either way, so it presents as
+// "invisible boxes near the barriers".
+{
+  const { CollisionGrid } = await import('../src/world/collision.js');
+  let worstAcross = 0;
+  let worstAlong = Infinity;
+  for (const deg of [0, 20, 45, 70, 90, 135, 200, 310]) {
+    const h = (deg * Math.PI) / 180;
+    const grid = new CollisionGrid(12);
+    // Same shape the track builds: 0.44m thick, 6m long, laid along heading h.
+    grid.insert({ type: 'box', x: 0, y: 0, z: 0, halfX: 0.22, halfY: 0.5, halfZ: 3.0, rotationY: h });
+    // forward = (sin h, cos h); across = (cos h, -sin h)
+    const fx = Math.sin(h);
+    const fz = Math.cos(h);
+    const ax = Math.cos(h);
+    const az = -Math.sin(h);
+    // 2.5m along the rail must still be inside it…
+    const along = new THREE.Vector3(fx * 2.5, 0, fz * 2.5);
+    if (grid.resolve(along, 0.3)) worstAlong = Math.min(worstAlong, 1);
+    else worstAlong = 0;
+    // …and 2.0m out to the side must be nowhere near it.
+    const across = new THREE.Vector3(ax * 2.0, 0, az * 2.0);
+    if (grid.resolve(across, 0.3)) worstAcross++;
+  }
+  ok('oriented boxes stay solid along their length', worstAlong === 1);
+  ok(
+    'oriented boxes are thin across their width at every angle',
+    worstAcross === 0,
+    `${worstAcross} of 8 angles reported a phantom hit 2m to the side`
+  );
+}
+
+// -- the car's own footprint --------------------------------------------------
+{
+  const car = new Vehicle({ profile: 'hatchback', world: flat, id: 'shape' });
+  const T = car.tuning;
+  ok(
+    'car hitbox is as wide as the car, not as long',
+    car.collisionRadius < T.halfExtents.x * 1.2,
+    `radius ${car.collisionRadius.toFixed(2)}m vs half-width ${T.halfExtents.x}m`
+  );
+  const span = Math.max(...car.collisionProbes) + car.collisionRadius;
+  ok(
+    '...and its probes still cover the full length',
+    Math.abs(span - T.halfExtents.z) < 0.05,
+    `covers ${span.toFixed(2)}m of ${T.halfExtents.z}m`
+  );
+
+  // Drive down the middle of a barriered straight and touch nothing.
+  const t1 = world.getTrack('track1');
+  const q2 = {};
+  let clipped = 0;
+  for (let i = 0; i < t1.count; i += 4) {
+    const probe = new THREE.Vector3(t1.px[i], t1.py[i] + 0.5, t1.pz[i]);
+    car.reset(probe, Math.atan2(t1.tx[i], t1.tz[i]));
+    for (let p = 0; p < car.collisionProbes.length; p++) {
+      if (world.collide(car.probePosition(p), car.collisionRadius)) clipped++;
+    }
+  }
+  ok(
+    'the racing line is clear of barriers all the way round',
+    clipped === 0,
+    `${clipped} phantom contacts on the centreline of ${t1.id}`
+  );
+
+  // How far off the racing line can you get before you touch the Armco? This is
+  // the number the player actually feels. It should be just past the edge of the
+  // tarmac — not well inside it, which is what "invisible boxes" means.
+  const contactAt = [];
+  for (const frac of [0.08, 0.21, 0.34, 0.47, 0.6, 0.73, 0.86, 0.95]) {
+    const i = t1.sampleIndexAt(frac);
+    const hw = t1.halfWidth[i];
+    let firstTouch = null;
+    for (let off = 0; off < hw + 4; off += 0.05) {
+      const p = new THREE.Vector3(
+        t1.px[i] + t1.rx[i] * off,
+        t1.py[i] + 0.5,
+        t1.pz[i] + t1.rz[i] * off
+      );
+      car.reset(p, Math.atan2(t1.tx[i], t1.tz[i]));
+      let hit = false;
+      for (let k = 0; k < car.collisionProbes.length; k++) {
+        if (world.collide(car.probePosition(k), car.collisionRadius)) hit = true;
+      }
+      if (hit) {
+        firstTouch = off - hw; // metres past the tarmac edge
+        break;
+      }
+    }
+    contactAt.push(firstTouch ?? 99);
+  }
+  const worst = Math.min(...contactAt);
+  ok(
+    'you can reach the edge of the tarmac before the barrier stops you',
+    worst > -0.15,
+    `nearest contact ${worst.toFixed(2)}m relative to the tarmac edge (negative = stopped early)`
+  );
+}
+
+// -- car on car ---------------------------------------------------------------
+{
+  const { resolveVehicleContacts, CONTACT } = await import('../src/vehicle/contacts.js');
+  const mk = (id, x, z, vz) => {
+    const v = new Vehicle({ profile: 'hatchback', world: flat, id });
+    v.reset(new THREE.Vector3(x, 0, z), 0);
+    v.velocity.set(0, 0, vz);
+    return v;
+  };
+
+  // Rear-ending: the faster car behind must slow, the one in front must speed up.
+  const behind = mk('behind', 0, 0, 30);
+  const ahead = mk('ahead', 0, 4.0, 12);
+  for (let i = 0; i < 120; i++) {
+    behind.fixedUpdate(DT);
+    ahead.fixedUpdate(DT);
+    resolveVehicleContacts([behind, ahead], DT);
+  }
+  ok(
+    'a rear-end transfers momentum',
+    behind.velocity.z < 30 && ahead.velocity.z > 12,
+    `${behind.velocity.z.toFixed(1)} m/s into ${ahead.velocity.z.toFixed(1)} m/s`
+  );
+  const gap = ahead.position.z - behind.position.z;
+  ok('...and the cars do not end up inside each other', gap > 3.4, `gap ${gap.toFixed(2)}m`);
+
+  // Without the pass they would pass straight through — check that directly.
+  const ghostA = mk('ga', 0, 0, 30);
+  const ghostB = mk('gb', 0, 4.0, 12);
+  for (let i = 0; i < 120; i++) {
+    ghostA.fixedUpdate(DT);
+    ghostB.fixedUpdate(DT);
+  }
+  ok(
+    'without the contact pass they overlap (proving the test is live)',
+    ghostA.position.z > ghostB.position.z,
+    `${ghostA.position.z.toFixed(1)} vs ${ghostB.position.z.toFixed(1)}`
+  );
+
+  // Side-swipe: a glancing hit should push the other car sideways and spin it.
+  const meA = mk('sa', 0, 0, 26);
+  const meB = mk('sb', 1.5, 1.0, 26);
+  const headingBefore = meB.heading;
+  for (let i = 0; i < 90; i++) {
+    meA.velocity.x = 3; // steer into them
+    meA.fixedUpdate(DT);
+    meB.fixedUpdate(DT);
+    resolveVehicleContacts([meA, meB], DT);
+  }
+  ok('a side-swipe shoves the other car sideways', meB.position.x > 1.8, `x=${meB.position.x.toFixed(2)}`);
+  ok('...and disturbs its heading', Math.abs(meB.heading - headingBefore) > 0.002,
+    `Δheading ${(meB.heading - headingBefore).toFixed(4)}`);
+
+  // A heavier car should win the exchange.
+  const light = mk('light', 0, 0, 28);
+  const heavy = new Vehicle({ profile: 'cruiser', world: flat, id: 'heavy' });
+  heavy.reset(new THREE.Vector3(0, 0, 4.0), 0);
+  heavy.velocity.set(0, 0, 10);
+  const lightStart = light.position.x;
+  for (let i = 0; i < 120; i++) {
+    light.fixedUpdate(DT);
+    heavy.fixedUpdate(DT);
+    resolveVehicleContacts([light, heavy], DT);
+  }
+  ok(
+    'mass decides who moves',
+    Math.abs(light.velocity.z - 28) > Math.abs(heavy.velocity.z - 10),
+    `light lost ${(28 - light.velocity.z).toFixed(1)}, heavy gained ${(heavy.velocity.z - 10).toFixed(1)}`
+  );
+}
+
 // -- collision ----------------------------------------------------------------
 const tree = world.scatter.colliders.find((c) => c.type === 'cylinder' && c.radius > 0.8);
 if (tree) {

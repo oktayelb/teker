@@ -148,7 +148,7 @@ export class SettingsMenu {
         this._sync(item.id);
       });
       apply = (v) => {
-        box.textContent = v ? '[ AÇIK ]' : '[ KAPALI ]';
+        box.textContent = v ?  '[ KAPALI ]': '[ AÇIK ]';
         box.dataset.on = String(!!v);
       };
     } else {

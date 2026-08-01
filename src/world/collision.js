@@ -111,12 +111,20 @@ export class CollisionGrid {
           } else {
             // Box: work in the box's local frame, clamp to find the closest
             // point, then transform the separation back out.
-            const cos = Math.cos(-c.rotationY || 0);
-            const sin = Math.sin(-c.rotationY || 0);
+            //
+            // `rotationY` uses the same heading convention as the vehicle, so
+            // the box's local +Z is `forward = (sin h, cos h)` and local +X is
+            // across it. Rotating by -h instead (which is what this did) leaves
+            // the frame reflected: correct at multiples of 90° and wrong
+            // everywhere between, so a 6m guardrail on a curve became a 6m wall
+            // sticking out across the road. That is a horrible bug to see,
+            // because the barrier you are hitting is drawn in the right place.
+            const cos = Math.cos(c.rotationY || 0);
+            const sin = Math.sin(c.rotationY || 0);
             const dx = position.x - c.x;
             const dz = position.z - c.z;
-            const lx = dx * cos - dz * sin;
-            const lz = dx * sin + dz * cos;
+            const lx = dx * cos - dz * sin; // across the box
+            const lz = dx * sin + dz * cos; // along it
             const clampedX = Math.max(-c.halfX, Math.min(c.halfX, lx));
             const clampedZ = Math.max(-c.halfZ, Math.min(c.halfZ, lz));
             const ox = lx - clampedX;
@@ -144,10 +152,9 @@ export class CollisionGrid {
                 lnz = Math.sign(lz) || 1;
               }
             }
-            const c2 = Math.cos(c.rotationY || 0);
-            const s2 = Math.sin(c.rotationY || 0);
-            nx = lnx * c2 - lnz * s2;
-            nz = lnx * s2 + lnz * c2;
+            // Inverse of the transform above (a rotation, so just its transpose).
+            nx = lnx * cos + lnz * sin;
+            nz = -lnx * sin + lnz * cos;
           }
 
           if (depth > bestDepth) {

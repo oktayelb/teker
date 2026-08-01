@@ -18,6 +18,7 @@ import { CameraRig } from '../render/cameraRig.js';
 import { World } from '../world/world.js';
 import { Vehicle } from '../vehicle/vehicle.js';
 import { createChassis } from '../vehicle/chassis.js';
+import { resolveVehicleContacts } from '../vehicle/contacts.js';
 import { Loop } from '../core/loop.js';
 import { ModeManager } from '../core/modes.js';
 import { input } from '../core/input.js';
@@ -174,6 +175,7 @@ export class Game {
     this.vehicles.push(v);
     if (isPlayer) {
       this.player = v;
+      v.isPlayer = true;
       this.camera.setTarget(v);
     }
     return v;
@@ -249,6 +251,9 @@ export class Game {
       if (driver) v.setCommand(driver(v, dt));
       v.fixedUpdate(dt);
     }
+    // Cars hit each other. Runs after every vehicle has integrated, so both
+    // sides of a contact are resolved against the same instant in time.
+    if (this.vehicles.length > 1) resolveVehicleContacts(this.vehicles, dt);
     this._rescueFallen();
     this.modes.fixedUpdate(dt);
   }

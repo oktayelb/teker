@@ -152,14 +152,14 @@ with a car, a steering input and an assertion about which way it ended up.
 
 ```
 src/
-  config/     tuning · camera · style · gameplay      ← the knobs
+  config/     tuning · camera · style · gameplay · settings   ← the knobs
   core/       loop · events · input · modes · rng · mathx
   render/     renderer · postfx · psx · materials · cameraRig · geometry
   world/      terrain · track · scatter · props · collision · world
     tracks/   track1 · track2 · track3                ← parkours as data
-  vehicle/    vehicle · chassis · ai
+  vehicle/    vehicle · chassis · ai · contacts
   audio/      procedural WebAudio — no asset files
-  ui/         logo · hud · screens · subtitles · tuningPanel
+  ui/         logo · hud · screens · subtitles · settingsMenu · tuningPanel
   game/       game · chase
     modes/    raceMode · openWorldMode
     intro/    introDirector · beats                   ← deletable
@@ -248,7 +248,7 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 89 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 111 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
 collision, and the physics: 0–100, top speed, braking, understeer on ice, and a
 simulated human driving the third parkour's corner and coming off it.
@@ -276,7 +276,14 @@ Three more only showed up on screen, which is why `npm run inspect` exists:
    follows the imports.
 5. **`BufferAttribute` has no `userData`.** Used it to cache brake-light state;
    threw every frame.
-6. **The entire road ribbon was wound inside-out.** Every quad's normal pointed
+6. **Collision shapes.** Three at once, all of which felt like "the hitboxes
+   are wrong": `CollisionGrid` rotated oriented boxes by `-rotationY`, so a
+   0.44m guardrail blocked 3.9m sideways at 45° and barriers on curves became
+   invisible walls; the car's own hitbox was a single circle sized to its
+   *length*, making a 1.8m-wide car behave as if it were 3.5m wide; and
+   vehicles had no vehicle-vehicle collision at all, so the AI were ghosts.
+   See `Vehicle#collisionProbes` and `src/vehicle/contacts.js`.
+7. **The entire road ribbon was wound inside-out.** Every quad's normal pointed
    down, so with front-face culling you saw straight through the tarmac to the
    terrain below — the road rendered as grass. A back-facing surface does not
    look broken, it looks *absent*. `GeomBuilder.addQuadFacing()` now makes the

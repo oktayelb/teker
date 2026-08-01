@@ -46,7 +46,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 
-**All phases complete.** `npm test` → 98/98, and it renders. See `README.md` for
+**All phases complete.** `npm test` → 111/111, and it renders. See `README.md` for
 how to tune it and where to build the next act.
 
 ## Status log
@@ -108,6 +108,18 @@ how to tune it and where to build the next act.
 9. **`AudioEngine#_live` / `#_now` are getters, not methods**, and
    `Screens#isModalOpen` likewise. Calling them with `()` throws. When reaching
    into a module someone else wrote, check the member kind first.
+10. **Oriented boxes were rotated the wrong way.** `CollisionGrid` built the
+    box's local frame with `-rotationY`, which is correct at multiples of 90°
+    and reflected everywhere between. A 0.44m guardrail blocked 3.9m sideways
+    at 45°, so barriers on curves became invisible walls across the road.
+    Now asserted at eight headings.
+11. **The car's hitbox was a circle sized to its LENGTH.** radius 1.74m for a
+    1.8m-wide car — it behaved as if 3.5m wide and clipped barriers 0.56m
+    *inside* the tarmac. Replaced with three probe circles down the centreline
+    (`Vehicle#collisionProbes`): correct width, correct length.
+12. **Cars had no vehicle-vehicle collision at all.** Only the static grid was
+    ever queried, so the AI were ghosts. `src/vehicle/contacts.js` runs an
+    impulse pass after every vehicle has integrated.
 
 ## Tooling note
 
