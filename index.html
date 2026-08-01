@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TEKERLEK</title>
+    <link rel="stylesheet" href="./src/ui/ui.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🛞</text></svg>"
+    />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <!-- The game renders here. Everything else is an overlay. -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- UI root. Owned by src/ui/. Nothing else may write into it. -->
+    <div id="ui-root" aria-live="polite"></div>
+
+    <noscript>
+      <p style="color: #e8e4d4; font-family: monospace; padding: 2rem">
+        TEKERLEK needs JavaScript.
+      </p>
+    </noscript>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

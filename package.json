@@ -1,0 +1,22 @@
+{
+  "name": "tekerlek",
+  "version": "0.1.0",
+  "description": "TEKERLEK — a racing game with a door in it.",
+  "scripts": {
+    "dev": "python3 -m http.server 8000",
+    "vendor": "node tools/vendor.mjs",
+    "postinstall": "node tools/vendor.mjs",
+    "test": "node tools/vendor.mjs && node tools/smoke.mjs",
+    "inspect": "node tools/inspect.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "type": "module",
+  "devDependencies": {
+    "puppeteer": "^25.4.0"
+  }
+}

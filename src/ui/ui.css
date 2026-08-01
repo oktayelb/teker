@@ -1,0 +1,1011 @@
+/* ===========================================================================
+   TEKERLEK — UI LAYER
+   ---------------------------------------------------------------------------
+   A CRT terminal pretending to be a 1997 racing game's overlay: monospace,
+   hard edges, no border-radius anywhere, no soft shadows, few colours.
+
+   EVERY colour is a custom property. `UI.applyTheme()` rewrites the whole set
+   on `#ui-root` at runtime from `src/config/style.js`, so the UI follows the
+   world from `forest` → `outside` → `night` → `glitch` without touching CSS.
+
+   Two runtime knobs drive most of the motion:
+     --glitch  0..1  how broken the layer is (set by UI.setGlitch)
+     --gx/--gy  px   per-frame jitter offset (written by UI.update)
+   =========================================================================== */
+
+:root {
+  /* Fallback palette == THEMES.forest.ui. Present so the page is never
+     unstyled during the gap between first paint and applyTheme(). */
+  --ink: #e8e4d4;
+  --ink-dim: #9a9684;
+  --accent: #d8483a;
+  --accent-alt: #54c8b0;
+  --panel: #141a18;
+  --panel-edge: #39463c;
+  --good: #7ec850;
+  --bad: #d8483a;
+
+  /* rgb triples for rgba() composition — CSS cannot decompose a hex var. */
+  --ink-rgb: 232 228 212;
+  --accent-rgb: 216 72 58;
+  --accent-alt-rgb: 84 200 176;
+  --panel-rgb: 20 26 24;
+  --bad-rgb: 216 72 58;
+  --haze: #9fb98a;
+
+  /* No webfonts, ever: the game must boot from a cold disk with no network. */
+  --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
+    "DejaVu Sans Mono", "Liberation Mono", monospace;
+
+  /* Type scale. vmin so the HUD keeps its proportions on any window. */
+  --fs-xs: clamp(9px, 1.15vmin, 13px);
+  --fs-sm: clamp(11px, 1.5vmin, 16px);
+  --fs-md: clamp(13px, 2vmin, 21px);
+  --fs-lg: clamp(18px, 3.2vmin, 34px);
+  --fs-xl: clamp(30px, 7.5vmin, 84px);
+  --pad: clamp(10px, 2.2vmin, 28px);
+
+  --glitch: 0;
+  --gx: 0px;
+  --gy: 0px;
+
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+   PAGE — the canvas fills the viewport, the UI floats over it
+   -------------------------------------------------------------------------- */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #05070a;
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+#game-canvas {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: #05070a;
+  /* The renderer upscales a ~288p buffer; never let the browser smooth it. */
+  image-rendering: pixelated;
+  touch-action: none;
+}
+
+#ui-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  /* The whole layer is click-through; only real controls opt back in. */
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.25;
+  color: var(--ink);
+  user-select: none;
+  -webkit-font-smoothing: none;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+/* A rolling refresh band. Invisible until the layer starts to break. */
+#ui-root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  opacity: calc(var(--glitch) * 0.5);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(var(--ink-rgb), 0.05) 44%,
+    rgba(var(--ink-rgb), 0.12) 50%,
+    rgba(var(--ink-rgb), 0.05) 56%,
+    transparent 100%
+  );
+  background-size: 100% 40vh;
+  background-repeat: no-repeat;
+  animation: tk-roll 5.5s linear infinite;
+}
+
+/* Scanlines + vignette. Sits above every UI element on purpose: the interface
+   is behind the glass of the tube, not printed on it. */
+#ui-root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  /* Deliberately weaker than the renderer's own scanline pass (style.js sets
+     0.18): these two stack on screen, and doubling them turns text to mush. */
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.11) 0 1px,
+      rgba(0, 0, 0, 0) 1px 3px
+    ),
+    radial-gradient(
+      ellipse 78% 78% at 50% 50%,
+      rgba(0, 0, 0, 0) 45%,
+      rgba(0, 0, 0, 0.34) 100%
+    );
+}
+
+@keyframes tk-roll {
+  from { background-position: 0 -45vh; }
+  to   { background-position: 0 105vh; }
+}
+
+/* --------------------------------------------------------------------------
+   STAGE — everything the UI builds lives inside, so the glitch transform has
+   a single target and never touches the CRT overlay above it.
+   -------------------------------------------------------------------------- */
+
+.tk-stage {
+  position: absolute;
+  inset: 0;
+  transform: translate3d(var(--gx), var(--gy), 0);
+  will-change: transform;
+}
+
+.tk-stage.is-glitching {
+  animation: tk-flicker 0.13s steps(2, end) infinite;
+}
+
+/* Cheap whole-layer RGB fringing: one shadow per channel, offset by --glitch.
+   Applied to text only — it is free compared to a filter on the layer. */
+.tk-stage.is-glitching .tk-txt,
+.tk-stage.is-glitching .tk-num {
+  text-shadow:
+    calc(var(--glitch) * -2.5px) 0 rgba(var(--accent-rgb), 0.75),
+    calc(var(--glitch) * 2.5px) 0 rgba(var(--accent-alt-rgb), 0.7);
+}
+
+@keyframes tk-flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: calc(1 - var(--glitch) * 0.22); }
+}
+
+/* --------------------------------------------------------------------------
+   SHARED ATOMS
+   -------------------------------------------------------------------------- */
+
+.tk-panel {
+  background: rgba(var(--panel-rgb), 0.72);
+  border: 1px solid var(--panel-edge);
+  padding: calc(var(--pad) * 0.5) calc(var(--pad) * 0.7);
+  /* Hard edges only. A rounded corner would date this to the wrong decade. */
+  border-radius: 0;
+}
+
+.tk-label {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.tk-num {
+  font-variant-numeric: tabular-nums;
+  /* Tabular digits alone are not enough at 60 Hz — lock the advance width so
+     a changing speed readout never reflows its neighbours. */
+  font-feature-settings: "tnum" 1;
+}
+
+.tk-btn {
+  pointer-events: auto;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.45em 1.1em;
+  font: inherit;
+  font-size: var(--fs-md);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  transition: color 90ms linear, background-color 90ms linear;
+}
+
+.tk-btn::before {
+  content: "  ";
+  white-space: pre;
+  color: var(--accent);
+}
+
+.tk-btn:hover,
+.tk-btn:focus-visible,
+.tk-btn.is-active {
+  color: var(--ink);
+  background: rgba(var(--ink-rgb), 0.07);
+  border-color: var(--panel-edge);
+  outline: none;
+}
+
+.tk-btn:hover::before,
+.tk-btn:focus-visible::before,
+.tk-btn.is-active::before {
+  content: "> ";
+}
+
+.tk-hidden {
+  display: none !important;
+}
+
+/* Opacity-hidden: keeps layout stable so panels do not jump when they return. */
+.tk-off {
+  opacity: 0 !important;
+  visibility: hidden;
+  transition: opacity 160ms linear;
+}
+
+.tk-cursor {
+  display: inline-block;
+  width: 0.62em;
+  height: 1.05em;
+  margin-left: 0.08em;
+  vertical-align: text-bottom;
+  background: var(--ink);
+  animation: tk-blink 1s steps(1, end) infinite;
+}
+
+@keyframes tk-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* ===========================================================================
+   LOGO — "Tek" | "erlek"
+   ---------------------------------------------------------------------------
+   The split is the thesis of the game: *tek* is Turkish for "the only one".
+   At --g:0 it must still read as one word, but wrong — a hairline seam and a
+   one-pixel vertical drift on "Tek", as if the renderer misplaced that glyph
+   run. At --g:1 the "Tek" tears off the front of the word entirely.
+   =========================================================================== */
+
+.tk-logo {
+  --g: 0;
+  --logo-fs: 96px;
+  display: inline-block;
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: min(var(--logo-fs), 13vw);
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+  text-transform: none;
+}
+
+.tk-logo-word {
+  display: flex;
+  align-items: baseline;
+  /* Baseline alignment plus a per-part translate is what makes the misfit
+     look like a layout bug rather than a designed offset. */
+}
+
+.tk-logo-part {
+  position: relative;
+  display: inline-block;
+}
+
+/* RGB fringing. Two ghost copies of the same glyph run, screen-blended so they
+   read as channel bleed on the tube, not as a drop shadow. */
+.tk-logo-part::before,
+.tk-logo-part::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: calc(0.32 + var(--g) * 0.6);
+}
+
+.tk-logo-part::before {
+  color: var(--accent);
+  transform: translate(calc(-0.6px - var(--g) * 0.05em), 0);
+}
+
+.tk-logo-part::after {
+  color: var(--accent-alt);
+  transform: translate(calc(0.6px + var(--g) * 0.045em), calc(var(--g) * 0.01em));
+}
+
+/* "Tek": drifts up-left and shears as the glitch rises. The -1px at rest is
+   the deliberate, barely-perceptible defect. */
+.tk-logo-tek {
+  transform: translate(
+      calc(var(--g) * -0.14em),
+      calc(-1px - var(--g) * 0.03em)
+    )
+    skewX(calc(var(--g) * -7deg));
+}
+
+/* "erlek": stays put, drifts slightly the other way so the word splits apart. */
+.tk-logo-rest {
+  transform: translate(calc(var(--g) * 0.05em), calc(var(--g) * 0.02em));
+}
+
+/* The seam. A vertical strip of scanlines in the gap — the tear exposes the
+   raster underneath the word. */
+.tk-logo-seam {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: calc(0.045em + var(--g) * 0.3em);
+  min-height: 0.9em;
+  margin: 0 0.01em;
+  background:
+    linear-gradient(
+      to right,
+      rgba(var(--accent-rgb), calc(var(--g) * 0.55)),
+      transparent
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      rgba(var(--ink-rgb), calc(0.16 + var(--g) * 0.5)) 0 1px,
+      transparent 1px 3px
+    );
+  opacity: calc(0.5 + var(--g) * 0.5);
+}
+
+.tk-logo.is-glitching .tk-logo-tek {
+  animation: tk-logo-tear calc(1.4s - var(--g) * 1s) steps(3, end) infinite;
+}
+
+.tk-logo.is-glitching .tk-logo-seam {
+  animation: tk-logo-seam-jump 0.28s steps(2, end) infinite;
+}
+
+/* Hard, blocky displacement — steps() keeps it digital instead of smooth. */
+@keyframes tk-logo-tear {
+  0%, 62%, 100% { clip-path: none; }
+  70% {
+    clip-path: inset(18% 0 46% 0);
+    transform: translate(calc(var(--g) * -0.3em), -1px) skewX(-9deg);
+  }
+  78% {
+    clip-path: none;
+    transform: translate(calc(var(--g) * -0.06em), calc(-1px + var(--g) * 0.04em));
+  }
+  86% {
+    clip-path: inset(54% 0 8% 0);
+    transform: translate(calc(var(--g) * -0.24em), -2px);
+  }
+}
+
+@keyframes tk-logo-seam-jump {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(calc(var(--g) * -0.06em)); }
+}
+
+/* The torn state also drops the ink out of "Tek" for a frame or two: the
+   system briefly cannot decide whether that glyph run should exist. */
+.tk-logo.is-torn .tk-logo-tek {
+  color: var(--accent-alt);
+}
+
+/* Inline wordmark for the HUD corner. */
+.tk-wordmark {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: 0.3em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  opacity: 0.55;
+}
+
+.tk-wordmark b {
+  position: relative;
+  top: -1px;
+  margin-right: 0.28em;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tk-wordmark i {
+  font-style: normal;
+}
+
+/* ===========================================================================
+   HUD
+   =========================================================================== */
+
+.tk-hud {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "tl tc tr"
+    "ml mc mr"
+    "bl bc br";
+  gap: var(--pad);
+  padding: var(--pad);
+  transition: opacity 220ms linear;
+}
+
+.tk-hud.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tk-hud-timing { grid-area: tl; justify-self: start; align-self: start; }
+.tk-hud-heat { grid-area: tc; justify-self: center; align-self: start; }
+.tk-hud-standings { grid-area: tr; justify-self: end; align-self: start; text-align: right; }
+.tk-hud-warning { grid-area: mc; justify-self: center; align-self: center; }
+.tk-hud-minimap { grid-area: mr; justify-self: end; align-self: center; }
+.tk-hud-mark { grid-area: bl; justify-self: start; align-self: end; }
+.tk-hud-speed { grid-area: br; justify-self: end; align-self: end; text-align: right; }
+
+/* -- timing ---------------------------------------------------------------- */
+
+.tk-time-row {
+  display: flex;
+  gap: 0.6em;
+  align-items: baseline;
+}
+
+.tk-time-cur {
+  font-size: var(--fs-lg);
+  letter-spacing: 0.04em;
+}
+
+.tk-time-best,
+.tk-time-delta {
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
+}
+
+.tk-time-delta.is-up { color: var(--bad); }
+.tk-time-delta.is-down { color: var(--good); }
+
+/* -- standings ------------------------------------------------------------- */
+
+.tk-standings-big {
+  font-size: var(--fs-lg);
+  letter-spacing: 0.02em;
+}
+
+.tk-standings-big small {
+  font-size: 0.5em;
+  color: var(--ink-dim);
+}
+
+/* Checkpoint pulse: --flash is decayed in JS so it never re-triggers a
+   reflow the way class-swapping an animation would. */
+.tk-hud-timing {
+  --flash: 0;
+  box-shadow: inset 0 0 0 calc(var(--flash) * 2px) var(--accent-alt);
+  background: rgba(var(--accent-alt-rgb), calc(var(--flash) * 0.16));
+}
+
+/* -- speed ----------------------------------------------------------------- */
+
+.tk-speed-num {
+  display: block;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+}
+
+.tk-speed-unit {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.34em;
+  color: var(--ink-dim);
+}
+
+.tk-speed-gear {
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
+  letter-spacing: 0.2em;
+}
+
+.tk-speed-bar {
+  display: flex;
+  gap: 2px;
+  height: clamp(5px, 0.9vmin, 10px);
+  margin-top: 0.45em;
+  width: clamp(120px, 22vmin, 260px);
+}
+
+.tk-seg {
+  flex: 1 1 0;
+  background: rgba(var(--ink-rgb), 0.11);
+}
+
+.tk-seg.is-on { background: var(--accent-alt); }
+.tk-seg.is-red { background: rgba(var(--bad-rgb), 0.14); }
+.tk-seg.is-red.is-on { background: var(--bad); }
+
+/* -- warning --------------------------------------------------------------- */
+
+.tk-hud-warning {
+  padding: 0.35em 1.1em;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--bad);
+  background: rgba(var(--panel-rgb), 0.8);
+  border: 1px solid var(--bad);
+  animation: tk-warn 0.66s steps(2, end) infinite;
+}
+
+@keyframes tk-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.28; }
+}
+
+/* -- heat / pursuit -------------------------------------------------------- */
+
+.tk-hud-heat {
+  --heat: 0;
+  width: clamp(200px, 42vmin, 520px);
+  text-align: center;
+}
+
+.tk-heat-track {
+  position: relative;
+  height: clamp(9px, 1.7vmin, 18px);
+  margin-top: 0.35em;
+  background: rgba(var(--panel-rgb), 0.85);
+  border: 1px solid var(--bad);
+  overflow: hidden;
+}
+
+.tk-heat-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--heat) * 100%);
+  background: var(--bad);
+  /* No transition: pursuit pressure must feel instantaneous, not eased. */
+}
+
+.tk-heat-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.42) 0 3px,
+    transparent 3px 8px
+  );
+}
+
+.tk-hud-heat .tk-label { color: var(--bad); }
+
+.tk-hud-heat.is-critical {
+  animation: tk-warn 0.4s steps(2, end) infinite;
+}
+
+.tk-hud-minimap {
+  width: clamp(70px, 12vmin, 130px);
+  aspect-ratio: 1;
+  opacity: 0.5;
+}
+
+/* -- per-mode HUD personalities ------------------------------------------- */
+/* The mode attribute is the only thing gameplay sets; visibility is CSS. */
+
+.tk-hud[data-mode="none"] > * { display: none; }
+
+.tk-hud[data-mode="race"] .tk-hud-heat { display: none; }
+
+/* Open world: the emptiness is the content. Only a small, dim speed readout
+   survives — there is nothing left to measure yourself against. */
+.tk-hud[data-mode="openWorld"] .tk-hud-timing,
+.tk-hud[data-mode="openWorld"] .tk-hud-standings,
+.tk-hud[data-mode="openWorld"] .tk-hud-heat,
+.tk-hud[data-mode="openWorld"] .tk-hud-mark {
+  display: none;
+}
+
+.tk-hud[data-mode="openWorld"] .tk-hud-speed {
+  opacity: 0.4;
+  transform: scale(0.58);
+  transform-origin: 100% 100%;
+}
+
+.tk-hud[data-mode="openWorld"] .tk-speed-bar { display: none; }
+
+/* Chase: the pursuit meter takes the screen; lap and split times are
+   meaningless now, so they are gone. */
+.tk-hud[data-mode="chase"] .tk-hud-timing,
+.tk-hud[data-mode="chase"] .tk-hud-standings {
+  display: none;
+}
+
+.tk-hud[data-mode="chase"] .tk-hud-heat {
+  width: clamp(260px, 58vmin, 720px);
+}
+
+.tk-hud[data-mode="chase"] .tk-seg.is-on { background: var(--bad); }
+
+/* ===========================================================================
+   SCREENS
+   =========================================================================== */
+
+.tk-screens {
+  position: absolute;
+  inset: 0;
+}
+
+.tk-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pad);
+  padding: var(--pad);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms linear, visibility 0s linear 180ms;
+}
+
+.tk-screen.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms linear, visibility 0s linear 0s;
+}
+
+.tk-screen-dim {
+  background: rgba(4, 6, 8, 0.72);
+}
+
+.tk-screen-solid {
+  background: #05070a;
+}
+
+/* Darkened, but not opaque — used by the title so the world stays visible
+   behind it. Heaviest at the top and bottom where the text sits. */
+.tk-screen-scrim {
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(4, 6, 8, 0.92) 0%,
+      rgba(4, 6, 8, 0.62) 34%,
+      rgba(4, 6, 8, 0.5) 58%,
+      rgba(4, 6, 8, 0.88) 100%
+    );
+}
+
+/* -- title ----------------------------------------------------------------- */
+
+.tk-title-logo { margin-bottom: calc(var(--pad) * 0.5); }
+
+.tk-title-tag {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.55em;
+  color: var(--ink-dim);
+  text-indent: 0.55em;
+}
+
+.tk-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: clamp(200px, 30vmin, 340px);
+  margin-top: var(--pad);
+}
+
+.tk-title-foot {
+  position: absolute;
+  bottom: var(--pad);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.2em;
+  color: var(--ink-dim);
+  opacity: 0.6;
+}
+
+/* -- countdown ------------------------------------------------------------- */
+
+.tk-count {
+  font-size: clamp(64px, 22vmin, 260px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  text-shadow: 0 0 0 transparent;
+}
+
+.tk-count.is-go { color: var(--good); }
+
+/* Re-keyed by JS toggling .is-beat, so each number gets its own punch. */
+.tk-count.is-beat { animation: tk-count-pop 240ms steps(4, end) 1; }
+
+@keyframes tk-count-pop {
+  from { transform: scale(1.5); opacity: 0.2; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* -- results --------------------------------------------------------------- */
+
+.tk-results {
+  min-width: clamp(260px, 44vmin, 520px);
+}
+
+.tk-results h2 {
+  margin: 0 0 0.8em;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-align: center;
+}
+
+.tk-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.6em;
+  padding: 0.36em 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.1);
+  font-size: var(--fs-md);
+}
+
+.tk-row .tk-label { align-self: center; }
+
+/* -- alert ----------------------------------------------------------------- */
+
+.tk-alert {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: clamp(220px, 38vmin, 480px);
+  max-width: 80vw;
+  padding: calc(var(--pad) * 0.55) calc(var(--pad) * 0.8);
+  text-align: center;
+  background: rgba(var(--panel-rgb), 0.9);
+  border: 1px solid var(--panel-edge);
+  border-left-width: 4px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 140ms linear, visibility 0s linear 140ms;
+}
+
+.tk-alert.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 140ms linear, visibility 0s linear 0s;
+}
+
+.tk-alert-title {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+}
+
+.tk-alert-body {
+  margin-top: 0.35em;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
+}
+
+.tk-alert[data-tone="system"] { border-left-color: var(--accent-alt); }
+.tk-alert[data-tone="system"] .tk-alert-title { color: var(--accent-alt); }
+
+.tk-alert[data-tone="warning"] { border-left-color: var(--bad); }
+.tk-alert[data-tone="warning"] .tk-alert-title { color: var(--bad); }
+
+.tk-alert[data-tone="glitch"] {
+  border-left-color: var(--accent);
+  animation: tk-alert-jump 0.19s steps(2, end) infinite;
+}
+
+.tk-alert[data-tone="glitch"] .tk-alert-title {
+  color: var(--ink);
+  text-shadow: -2px 0 var(--accent), 2px 0 var(--accent-alt);
+}
+
+@keyframes tk-alert-jump {
+  0%, 100% { transform: translateX(-50%); }
+  50% { transform: translate(calc(-50% + 2px), -1px); }
+}
+
+/* -- system message -------------------------------------------------------- */
+/* This is the voice of the thing that runs the world. It should look like it
+   is being printed by the game itself, not designed by anybody. */
+
+.tk-sysmsg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: clamp(280px, 52vmin, 640px);
+  max-width: min(92vw, 760px);
+  padding: calc(var(--pad) * 0.7) calc(var(--pad) * 0.9);
+  background: rgba(4, 8, 7, 0.92);
+  border: 1px solid var(--accent-alt);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms linear, visibility 0s linear 120ms;
+}
+
+.tk-sysmsg.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 120ms linear, visibility 0s linear 0s;
+}
+
+.tk-sysmsg-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.7em;
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid rgba(var(--accent-alt-rgb), 0.35);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.28em;
+  color: var(--accent-alt);
+}
+
+.tk-sysmsg-body {
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--accent-alt);
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 1.55em;
+}
+
+.tk-sysmsg-line { display: block; }
+
+.tk-sysmsg-hint {
+  margin-top: 0.9em;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.2em;
+  color: var(--ink-dim);
+  opacity: 0;
+  transition: opacity 200ms linear;
+}
+
+.tk-sysmsg-hint.is-shown { opacity: 0.75; }
+
+.tk-sysmsg .tk-cursor { background: var(--accent-alt); }
+
+/* -- loading --------------------------------------------------------------- */
+
+.tk-loading-text {
+  font-size: var(--fs-md);
+  letter-spacing: 0.3em;
+  color: var(--ink-dim);
+}
+
+.tk-loading-bar {
+  width: clamp(160px, 30vmin, 380px);
+  height: 3px;
+  margin-top: 1em;
+  background: rgba(var(--ink-rgb), 0.12);
+  overflow: hidden;
+}
+
+.tk-loading-bar::after {
+  content: "";
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: var(--accent-alt);
+  animation: tk-load 1.1s steps(12, end) infinite;
+}
+
+@keyframes tk-load {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(330%); }
+}
+
+/* -- fade ------------------------------------------------------------------ */
+
+.tk-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.tk-fade.is-on {
+  visibility: visible;
+}
+
+/* ===========================================================================
+   SUBTITLES — the narrative channel. Never the same voice as the system box.
+   =========================================================================== */
+
+.tk-subs {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(52px, 11vmin, 130px);
+  transform: translateX(-50%);
+  width: min(84vw, 900px);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 220ms linear;
+}
+
+.tk-subs.is-shown { opacity: 1; }
+
+.tk-subs-speaker {
+  display: block;
+  margin-bottom: 0.3em;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.tk-subs-text {
+  display: inline-block;
+  padding: 0.25em 0.7em;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--ink);
+  background: rgba(4, 6, 8, 0.62);
+  text-shadow: 0 1px 0 #000;
+}
+
+.tk-subs[data-tone="system"] .tk-subs-text {
+  color: var(--accent-alt);
+  letter-spacing: 0.12em;
+}
+
+.tk-subs[data-tone="radio"] .tk-subs-text {
+  color: var(--ink-dim);
+  font-style: italic;
+  /* Radio chatter is band-limited; the brackets do what a filter would. */
+}
+
+.tk-subs[data-tone="radio"] .tk-subs-text::before { content: "‹ "; }
+.tk-subs[data-tone="radio"] .tk-subs-text::after { content: " ›"; }
+
+/* ===========================================================================
+   REDUCED MOTION — keep the look, drop the movement.
+   The layer still reads as broken; it just stops shaking.
+   =========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  #ui-root::before { display: none; }
+
+  .tk-stage,
+  .tk-stage.is-glitching,
+  .tk-logo.is-glitching .tk-logo-tek,
+  .tk-logo.is-glitching .tk-logo-seam,
+  .tk-hud-warning,
+  .tk-hud-heat.is-critical,
+  .tk-alert[data-tone="glitch"],
+  .tk-count.is-beat,
+  .tk-loading-bar::after {
+    animation: none !important;
+  }
+
+  .tk-stage { transform: none !important; }
+
+  .tk-cursor { animation: none !important; opacity: 1; }
+
+  .tk-hud-warning,
+  .tk-hud-heat.is-critical { opacity: 1; }
+
+  .tk-loading-bar::after { width: 100%; }
+
+  * { transition-duration: 60ms !important; }
+}
