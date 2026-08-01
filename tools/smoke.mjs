@@ -172,29 +172,42 @@ for (const id of ['track1', 'track2', 'track3']) {
   );
 }
 
-// The ice patch has to actually be ice where the data says it is.
-const iceSamples = t3.surfaces.filter((s) => s === 'ICE').length;
-ok('parkur 3 has an ice section', iceSamples > 20, `${iceSamples} samples`);
-// Read the gap from the data rather than hard-coding it, so moving the corner
-// cannot leave this test silently checking the wrong stretch of road.
-const gap = t3.data.barriers.gaps[0];
-const gapColliders = t3.colliders.filter((c) => {
-  const t = c.sample / t3.count;
-  return t > gap.from && t < gap.to;
-});
+// Parkur 3 is an unsealed track with a slick section, marked by plastic posts
+// and lit by a rig — not a road with Armco. Check the shape of it holds.
+const slickSamples = t3.surfaces.filter((s) => s === 'SLICK').length;
+ok('parkur 3 has a slick section', slickSamples > 20, `${slickSamples} samples`);
 ok(
-  'parkur 3 has a hole in its barrier',
-  gapColliders.length === 0,
-  `${gapColliders.length} barriers between ${gap.from} and ${gap.to}`
+  'parkur 3 is unsealed for its whole length',
+  t3.surfaces.every((s) => s !== 'TARMAC'),
+  `${t3.surfaces.filter((s) => s === 'TARMAC').length} tarmac samples`
 );
-// …and the hole has to cover the ice, or the player bounces off Armco instead
-// of discovering there is a world out there.
-const iceRange = t3.data.patches.filter((p) => p.surface === 'ICE');
+ok('parkur 3 has no barriers at all', t3.colliders.length === 0, `${t3.colliders.length} colliders`);
+ok('parkur 3 has plastic markers instead', t3.markers.length > 100, `${t3.markers.length} posts`);
+ok('parkur 3 has a lighting rig', t3.lightAnchors.length > 20, `${t3.lightAnchors.length} lamps`);
+
+// The markers and the lights stop over the same stretch, and the slick section
+// is inside it. If these three drift apart the whole beat stops landing.
+const mGap = t3.data.markers.gaps[0];
+const lGap = t3.data.lighting.gaps[0];
+const slick = t3.data.patches.find((p) => p.surface === 'SLICK');
 ok(
-  'the hole covers the ice',
-  iceRange.every((p) => p.from >= gap.from && p.to <= gap.to),
-  `ice ${iceRange[0].from}–${iceRange[0].to} inside gap ${gap.from}–${gap.to}`
+  'the unlit stretch and the unmarked stretch are the same stretch',
+  mGap.from === lGap.from && mGap.to === lGap.to,
+  `markers ${mGap.from}–${mGap.to}, lights ${lGap.from}–${lGap.to}`
 );
+ok(
+  'the slick clay sits inside the dark',
+  slick.from >= lGap.from && slick.to <= lGap.to,
+  `slick ${slick.from}–${slick.to} in dark ${lGap.from}–${lGap.to}`
+);
+ok(
+  'the blackout is triggered before the player reaches the dark',
+  t3.data.breakout.blackoutAt < lGap.from,
+  `blackout at ${t3.data.breakout.blackoutAt}, dark starts ${lGap.from}`
+);
+// Nothing on this track may be solid — that is the whole design.
+const markerColliders = t3.markers.filter((m) => m.solid);
+ok('the plastic posts are not solid', markerColliders.length === 0);
 ok('parkur 1 is fully enclosed', world.getTrack('track1').colliders.length > 100);
 
 // ---------------------------------------------------------------------------
@@ -353,7 +366,7 @@ function runCorner(driverFactory, label, profile = 'hatchback', ignoreSurfaces =
   simulate(car, 120 * 24, (v, dt) => {
     const cmd = drive(v, dt);
     const r = t3.query(v.position.x, v.position.z, q);
-    if (r && r.surface === 'ICE' && entrySpeed === 0) entrySpeed = v.speed;
+    if (r && r.surface === 'SLICK' && entrySpeed === 0) entrySpeed = v.speed;
     // A null query means the car is outside the track's spatial hash entirely —
     // further off than any number the hash can report.
     const edge = r ? r.dist - r.halfWidth : Infinity;
@@ -372,9 +385,9 @@ const wouldTrigger =
   human.maxOff > BREAKOUT.escapeDistance ||
   (human.maxOff > 30 && human.peakOffFor > BREAKOUT.escapeHoldSeconds);
 ok(
-  'a player arrives at the ice carrying speed',
+  'a player arrives at the clay carrying speed',
   human.entrySpeed > 28,
-  `${(human.entrySpeed * 3.6).toFixed(0)} km/h at the ice`
+  `${(human.entrySpeed * 3.6).toFixed(0)} km/h at the clay`
 );
 ok(
   'and loses the car completely',
@@ -396,7 +409,7 @@ const ai = runCorner(
   'ai-escapee'
 );
 ok(
-  'even a perfect line gets thrown off the road',
+  'even a perfect line gets thrown off the track',
   ai.maxOff > 5,
   `${ai.maxOff.toFixed(1)}m past the edge (it recovers; a human does not)`
 );
@@ -613,7 +626,91 @@ if (tree) {
 }
 
 // ---------------------------------------------------------------------------
-section('6. seed determinism');
+section('6. lights');
+
+{
+  const { LightPool, LIGHT_BUDGET } = await import('../src/render/lightPool.js');
+  const { TrackLighting, LIGHTING } = await import('../src/world/lighting.js');
+
+  const scene = new THREE.Scene();
+  const pool = new LightPool(scene);
+  const lightCount = scene.children.filter((o) => o.isLight).length;
+  ok(
+    'the pool allocates its whole budget up front',
+    lightCount === LIGHT_BUDGET.point + LIGHT_BUDGET.spot,
+    `${lightCount} lights in the scene`
+  );
+  ok('…all parked at zero', scene.children.filter((o) => o.isLight && o.intensity > 0).length === 0);
+
+  const taken = [];
+  for (let i = 0; i < LIGHT_BUDGET.spot; i++) taken.push(pool.acquireSpot());
+  ok('spot leases run out cleanly', pool.acquireSpot() === null);
+  taken[0].release();
+  ok('…and come back after release', pool.acquireSpot() !== null);
+  pool.releaseAll();
+
+  // The light count must never change after boot, or three recompiles every
+  // material in the world at the exact moment something dramatic happens.
+  const afterChurn = scene.children.filter((o) => o.isLight).length;
+  ok('acquiring never changes the light count', afterChurn === lightCount, `${afterChurn}`);
+
+  // -- the rig ---------------------------------------------------------------
+  const rigPool = new LightPool(new THREE.Scene());
+  const rig = new TrackLighting({ track: t3, pool: rigPool });
+  ok('the rig leases lights for the nearest poles', rig._leases.length === LIGHTING.maxActive);
+
+  // Point the camera at one known anchor and check that anchor gets a light.
+  const target = t3.lightAnchors[10];
+  rig.update(0.5, { x: target.x, y: target.y, z: target.z });
+  const lit = rig._leases.filter((l) => l.light.intensity > 0);
+  ok('…and they actually light up', lit.length > 0, `${lit.length} of ${rig._leases.length} on`);
+  const nearest = rig._leases[0].light;
+  ok(
+    '…nearest first',
+    Math.hypot(nearest.position.x - target.x, nearest.position.z - target.z) < 6,
+    `${Math.hypot(nearest.position.x - target.x, nearest.position.z - target.z).toFixed(1)}m from the anchor`
+  );
+
+  // Blackout: the whole rig has to go to nothing, and stay there.
+  rig.blackout(9);
+  for (let i = 0; i < 60; i++) rig.update(1 / 30, { x: target.x, y: target.y, z: target.z });
+  ok('blackout kills the rig', rig.power < 0.02, `power ${rig.power.toFixed(3)}`);
+  ok('…and every lamp with it', rig._leases.every((l) => l.light.intensity < 1));
+  rig.hold();
+  rig.dispose();
+  ok('disposing gives the leases back', rigPool.points.every((l) => !l.inUse));
+}
+
+{
+  // Headlights are the scarcest lease. Only the cars the player watches in the
+  // dark get one — see the `headlights` default in createChassis.
+  const { createChassis } = await import('../src/vehicle/chassis.js');
+  const { LightPool } = await import('../src/render/lightPool.js');
+  const scene = new THREE.Scene();
+  const pool = new LightPool(scene);
+  const he = { x: 0.9, y: 0.65, z: 2.05 };
+  const mk = (kind) => createChassis({ materials, theme, kind, halfExtents: he, lightPool: pool });
+
+  const before = pool.spots.filter((l) => l.inUse).length;
+  const rival = mk('rival');
+  ok('rivals do not burn a spot light', pool.spots.filter((l) => l.inUse).length === before);
+  const player = mk('player');
+  ok('the player does', pool.spots.filter((l) => l.inUse).length === before + 1);
+  const cop = mk('cop');
+  ok('so do the cops', pool.spots.filter((l) => l.inUse).length === before + 2);
+
+  player.setHeadlights(true);
+  const on = pool.spots.find((l) => l.inUse && l.light.intensity > 0);
+  ok('switching them on lights a real spot', !!on, on ? `intensity ${on.light.intensity}` : 'none');
+  player.setHeadlights(false);
+  ok('…and off again', !pool.spots.some((l) => l.inUse && l.light.intensity > 0));
+
+  for (const c of [rival, player, cop]) c.dispose();
+  ok('chassis dispose returns every lease', pool.spots.every((l) => !l.inUse) && pool.points.every((l) => !l.inUse));
+}
+
+// ---------------------------------------------------------------------------
+section('7. seed determinism');
 const worldB = new World({ materials, theme, seed: 0x7e4e17 });
 await worldB.build({ trackData: ALL_TRACKS, scatter: false });
 const sampleA = world.terrain.heightAt(123, -456);

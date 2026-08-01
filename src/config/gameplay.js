@@ -15,6 +15,14 @@ export const RACE = {
   /** Grid spacing, metres. */
   gridRowGap: 7.0,
   gridColumnGap: 4.2,
+  /**
+   * Extra gap between the player on pole and the first row of rivals.
+   *
+   * Must exceed the chase camera's pull-back (`CAMERA_RIGS.chase.offset.z`,
+   * currently -7.4) plus a car length, or a rival starts *inside the camera*
+   * and the first thing the player sees is the underside of somebody's door.
+   */
+  poleGap: 14.0,
   /** How far off the racing line before "OFF TRACK" shows, in ribbon half-widths. */
   offTrackFactor: 1.15,
   /** Seconds off-track before the game respawns you (0 disables). */

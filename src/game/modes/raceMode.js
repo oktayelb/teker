@@ -149,13 +149,13 @@ export class RaceMode extends Mode {
     const theme = g.theme;
 
     // Player takes pole's inside line; the AI fills the grid behind.
-    const playerSlot = this.track.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap);
+    const playerSlot = this.track.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap, RACE.poleGap);
     const player = g.spawnVehicle({ kind: 'player', color: theme.vehicles.player, id: 'player', isPlayer: true });
     player.reset(playerSlot.position, playerSlot.heading);
     g.setDriver(player, (v) => (this.state === 'racing' ? g.input.state : ZERO_COMMAND));
 
     for (let i = 0; i < rivalCount; i++) {
-      const slot = this.track.gridSlot(i + 1, RACE.gridRowGap, RACE.gridColumnGap);
+      const slot = this.track.gridSlot(i + 1, RACE.gridRowGap, RACE.gridColumnGap, RACE.poleGap);
       const rival = g.spawnVehicle({
         profile: 'rival',
         kind: 'rival',

@@ -187,6 +187,12 @@ export const SURFACES = {
   GRASS: { id: 'GRASS', grip: 0.6, drag: 1.7, power: 0.8, rumble: 0.5, dustColor: 0x5f7a44 },
   MUD: { id: 'MUD', grip: 0.42, drag: 2.3, power: 0.68, rumble: 0.7, dustColor: 0x5b4a35 },
   /**
+   * SLICK — wet clay on an unsealed forest road. Mechanically ICE, but it
+   * belongs on a dirt track, where a patch of ice would look absurd. This is
+   * what takes parkur 3 away from the player.
+   */
+  SLICK: { id: 'SLICK', grip: 0.12, drag: 1.1, power: 0.4, rumble: 0.3, dustColor: 0x6a5a44 },
+  /**
    * ICE is the most consequential number in this file. It is what takes the
    * third parkour away from the player. At 0.12 the tyres can make roughly
    * 1.9 m/s² of cornering force, so the fast left-hander on `track3` — radius

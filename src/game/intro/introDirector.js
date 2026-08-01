@@ -90,6 +90,9 @@ export class IntroDirector {
     this._phaseTime += dt;
 
     switch (this.phase) {
+      case 'race3':
+        this._watchForBlackout(dt);
+        break;
       case 'free':
         this._updateFree(dt);
         break;
@@ -116,7 +119,7 @@ export class IntroDirector {
 
     // Park a car on the first grid so the title screen has something to look at.
     const t1 = g.world.getTrack('track1');
-    const slot = t1.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap);
+    const slot = t1.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap, RACE.poleGap);
     const showcase = g.spawnVehicle({ kind: 'player', color: g.theme.vehicles.player, id: 'showcase' });
     showcase.reset(slot.position, slot.heading);
     g.camera.setTarget(showcase);
@@ -177,6 +180,50 @@ export class IntroDirector {
 
   // -- THE BREAK ------------------------------------------------------------
 
+  /**
+   * Watch the player round parkur 3 and cut the lights at the scripted point.
+   * Called from `update()`; `race:offCourse` handles what happens after.
+   */
+  _watchForBlackout(dt) {
+    if (this.phase !== 'race3' || this._blackoutDone) return;
+    const g = this.game;
+    const track = g.world.getTrack('track3');
+    const player = g.player;
+    if (!track || !player) return;
+
+    const q = track.query(player.position.x, player.position.z, this._q || (this._q = {}));
+    if (!q) return;
+
+    const cfg = track.data.breakout || {};
+    const at = cfg.blackoutAt ?? 0.44;
+    // A window, not an instant — the player can be doing 40 m/s through here.
+    if (q.progress < at || q.progress > at + 0.05) return;
+
+    this._blackoutDone = true;
+    this._cutTheLights(track, cfg);
+  }
+
+  async _cutTheLights(track, cfg) {
+    const g = this.game;
+    const rig = g.world.lighting.get('track3');
+
+    events.emit('intro:blackout', {});
+    // The rig stutters and dies. It does not come back before the corner.
+    rig?.blackout(cfg.blackoutSeconds ?? 9);
+    g.audio.playGlitchStinger?.();
+    g.setGlitch(0.28);
+    this._play('race3.blackout');
+
+    // Headlights. The reason they were off is that they were never needed:
+    // the route was lit for you, right up until it wasn't.
+    await this._wait(0.55);
+    g.player?.chassis?.setHeadlights(true);
+    events.emit('ui:subtitle', { text: 'FARLAR', duration: 1.4, tone: 'system' });
+
+    await this._wait(0.9);
+    g.setGlitch(0);
+  }
+
   _onOffCourse(p) {
     if (this.phase !== 'race3' || !p.isPlayer) return;
     // Generous on purpose: a long slide OR a sustained excursion both count.
@@ -215,6 +262,12 @@ export class IntroDirector {
     //    No fade, no load, no reset — this is the whole trick.
     await g.modes.switchTo('openWorld', { keepPlayer: true, keepRacers: true, rig: 'chaseWide' });
     g.world.setBarriersEnabled('track3', false);
+    // The rig never comes back on. Drive past the stage later and it is dark.
+    const rig = g.world.lighting.get('track3');
+    rig?.hold();
+    rig?.setPower(0);
+    // Headlights stay on from here — it is the only light the player owns.
+    g.player?.chassis?.setHeadlights(true);
 
     g.loop.effectTimeScale = 1;
     g.input.setLocked(false);

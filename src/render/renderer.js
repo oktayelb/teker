@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { resolveTheme, resolveRenderPreset } from '../config/style.js';
 import { MaterialLibrary } from './materials.js';
 import { PostFx } from './postfx.js';
+import { LightPool } from './lightPool.js';
 import { events } from '../core/events.js';
 import { clamp01, lerp } from '../core/mathx.js';
 
@@ -105,6 +106,12 @@ export class RetroRenderer {
     this.postfx = new PostFx(this.preset, this.theme);
 
     this._buildEnvironment();
+
+    /**
+     * Every light in the game comes from here. Allocated once so three never
+     * has to recompile materials for a changed light count. See lightPool.js.
+     */
+    this.lights = new LightPool(this.scene);
 
     this.renderTarget = null;
     this.width = 1;

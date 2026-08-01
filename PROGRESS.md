@@ -46,7 +46,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 
-**All phases complete.** `npm test` → 111/111, and it renders. See `README.md` for
+**All phases complete.** `npm test` → 136/136, and it renders. See `README.md` for
 how to tune it and where to build the next act.
 
 ## Status log
@@ -80,6 +80,13 @@ how to tune it and where to build the next act.
   `src/ui/settingsMenu.js`, effects in `Game#_applySetting`, persisted to
   localStorage. Sound / light / video / camera. Adding an option = schema entry
   + one `case`.
+
+- **P16** — Parkur 3 rebuilt as an unsealed, lit night stage: no barriers at
+  all, plastic delineator posts with no colliders, a floodlight rig
+  (`src/world/lighting.js`), a mid-race blackout, and headlights on the player
+  and the cops. Every light in the game now comes from a fixed pool
+  (`src/render/lightPool.js`) so the count never changes and three never
+  recompiles materials mid-scene.
 
 ## Bugs found so far (do not reintroduce)
 
@@ -120,6 +127,17 @@ how to tune it and where to build the next act.
 12. **Cars had no vehicle-vehicle collision at all.** Only the static grid was
     ever queried, so the AI were ghosts. `src/vehicle/contacts.js` runs an
     impulse pass after every vehicle has integrated.
+13. **The headlight beam cone was built pointing backwards.** `ConeGeometry`
+    runs along +Y; a *positive* quarter-turn about X puts it on -Z, i.e. behind
+    the car, where it swallowed the chase camera and filled the screen with an
+    additive haze that looked nothing like a beam. Use `rotateX(-PI/2)`.
+14. **A rival started inside the chase camera.** The grid put row 1 exactly
+    where the camera sits, so the first thing you saw was the underside of
+    somebody's door. Hence `RACE.poleGap` — it must exceed the rig's pull-back
+    plus a car length.
+15. **Light intensities again.** `LIGHTING.intensity: 120` lit nothing; the
+    physical units need ~520 for a lamp 8m up over a night-albedo ground.
+    Whenever a light "does not work", check the magnitude before the wiring.
 
 ## Tooling note
 

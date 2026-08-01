@@ -88,6 +88,10 @@ export class Track {
     this.checkpoints = [];
     this.startLine = null;
     this.colliders = [];
+    /** Plastic delineator posts: `{x, y, z, side, t}`. Cosmetic, never solid. */
+    this.markers = [];
+    /** Where the lighting rig hangs: `{x, y, z, side, t}`. */
+    this.lightAnchors = [];
 
     /** Spatial hash: cell key → sample indices. */
     this._grid = new Map();
@@ -151,6 +155,8 @@ export class Track {
     this._buildSpatialHash();
     this._buildCheckpoints();
     this._buildBarriers();
+    this._buildMarkers();
+    this._buildLightAnchors();
   }
 
   _wrap(i, n) {
@@ -169,7 +175,7 @@ export class Track {
     this.halfWidth = new Float32Array(count);
     this.curvature = new Float32Array(count);
     this.arc = new Float32Array(count);
-    this.surfaces = new Array(count).fill('TARMAC');
+    this.surfaces = new Array(count).fill(this.data.defaultSurface || 'TARMAC');
     /** Metres beyond the tarmac that this sample's surface keeps going. */
     this.runoff = new Float32Array(count);
   }
@@ -342,6 +348,73 @@ export class Track {
     }
   }
 
+  /**
+   * Plastic delineator posts. These mark where the road is and nothing else —
+   * they have no colliders at all. A car goes straight through them, which is
+   * the point: on a route defined by posts rather than Armco, the only thing
+   * keeping you on the road is being able to see it.
+   */
+  _buildMarkers() {
+    const cfg = this.data.markers;
+    if (!cfg || cfg.enabled === false) return;
+    const step = Math.max(1, Math.round((cfg.spacing ?? 9) / ROAD.sampleSpacing));
+    const gaps = cfg.gaps || [];
+    const sides = cfg.sides || ['left', 'right'];
+
+    for (let i = 0; i < this.count; i += step) {
+      const t = i / this.count;
+      if (gaps.some((g) => t >= g.from && t <= g.to)) continue;
+      for (const side of sides) {
+        const s = side === 'left' ? -1 : 1;
+        const off = this.halfWidth[i] + (cfg.offset ?? 0.7);
+        this.markers.push({
+          x: this.px[i] + this.rx[i] * off * s,
+          y: this.py[i],
+          z: this.pz[i] + this.rz[i] * off * s,
+          rotationY: Math.atan2(this.tx[i], this.tz[i]),
+          side,
+          t,
+          sample: i,
+        });
+      }
+    }
+  }
+
+  /**
+   * Where the lighting rig hangs. Only anchors — `src/world/lighting.js` owns
+   * the actual lights, because how many of them can be lit at once is a
+   * rendering budget question, not a track question.
+   */
+  _buildLightAnchors() {
+    const cfg = this.data.lighting;
+    if (!cfg || cfg.enabled === false) return;
+    const step = Math.max(1, Math.round((cfg.spacing ?? 40) / ROAD.sampleSpacing));
+    const gaps = cfg.gaps || [];
+    let flip = 0;
+
+    for (let i = 0; i < this.count; i += step) {
+      const t = i / this.count;
+      if (gaps.some((g) => t >= g.from && t <= g.to)) continue;
+      // Alternating sides reads as a rigged route rather than an avenue, and
+      // halves the number of poles for the same coverage.
+      const side = cfg.alternate === false ? 'right' : flip++ % 2 ? 'left' : 'right';
+      const s = side === 'left' ? -1 : 1;
+      const off = this.halfWidth[i] + (cfg.offset ?? 4.5);
+      this.lightAnchors.push({
+        x: this.px[i] + this.rx[i] * off * s,
+        y: this.py[i],
+        z: this.pz[i] + this.rz[i] * off * s,
+        height: cfg.height ?? 8,
+        // Lamps lean over the road, so the head is inboard of the pole.
+        aimX: this.px[i],
+        aimZ: this.pz[i],
+        side,
+        t,
+        sample: i,
+      });
+    }
+  }
+
   // -- queries --------------------------------------------------------------
 
   /**
@@ -408,12 +481,18 @@ export class Track {
     return lerp(h, q.height, w * w);
   };
 
-  /** Position and heading for grid slot `index`. */
-  gridSlot(index, rowGap, colGap) {
-    const row = Math.floor(index / 2);
-    const col = index % 2 === 0 ? -1 : 1;
+  /**
+   * Position and heading for grid slot `index`.
+   *
+   * Slot 0 is POLE: centred, alone on the front row, and `poleGap` clear of
+   * everyone else so the chase camera has empty track to sit in.
+   */
+  gridSlot(index, rowGap, colGap, poleGap = 0) {
+    const isPole = index === 0;
+    const row = isPole ? 0 : Math.floor((index - 1) / 2) + 1;
+    const col = isPole ? 0 : (index - 1) % 2 === 0 ? -1 : 1;
     // Walk backwards along the track from the start line.
-    const back = (row + 1) * rowGap;
+    const back = rowGap + (isPole ? 0 : poleGap + (row - 1) * rowGap);
     const samplesBack = Math.round(back / ROAD.sampleSpacing);
     const i = this.loop
       ? ((this.startLine.sample - samplesBack) % this.count + this.count) % this.count
@@ -457,6 +536,8 @@ export class Track {
     const decalB = new GeomBuilder();
     const R = theme.road;
 
+    const paint = this.data.paint || {};
+
     const c = this.count;
     const last = this.loop ? c : c - 1;
     let dashRun = 0;
@@ -495,9 +576,13 @@ export class Track {
         R.shoulder
       );
 
-      // Edge lines.
+      // Painted markings. Hoisted out of the conditionals below because the
+      // centre dashes need `lw` too, and an unsealed track skips both.
       const li = ROAD.lineInset;
       const lw = ROAD.lineWidth;
+
+      // Edge lines.
+      if (paint.edgeLines !== false) {
       for (const side of [-1, 1]) {
         const inner = side * (this.halfWidth[i] - li);
         const outer = side * (this.halfWidth[i] - li - lw);
@@ -509,11 +594,12 @@ export class Track {
         const p3 = this._edge(j, Math.min(innerJ, outerJ), ROAD.roadLift + 0.012);
         decalB.addQuadFacing(p0, p1, p2, p3, R.edgeLine);
       }
+      }
 
       // Dashed centre line.
       dashRun += segLen;
       const cycle = ROAD.centreDashLength + ROAD.centreDashGap;
-      if (dashRun % cycle < ROAD.centreDashLength) {
+      if (paint.centreLine !== false && dashRun % cycle < ROAD.centreDashLength) {
         decalB.addQuadFacing(
           this._edge(i, -lw, ROAD.roadLift + 0.012),
           this._edge(i, lw, ROAD.roadLift + 0.012),
@@ -525,7 +611,7 @@ export class Track {
 
       // Kerbs on the inside of tight corners.
       const k = this.curvature[i];
-      if (Math.abs(k) > ROAD.kerbCurvature) {
+      if (paint.kerbs !== false && Math.abs(k) > ROAD.kerbCurvature) {
         kerbRun += segLen;
         const stripe = Math.floor(kerbRun / ROAD.kerbStripeLength) % 2 === 0;
         const side = k > 0 ? -1 : 1;
@@ -555,6 +641,10 @@ export class Track {
     group.add(this._buildStartLine(materials, theme));
     const barriers = this._buildBarrierMesh(materials, theme);
     if (barriers) group.add(barriers);
+    const markers = this._buildMarkerMesh(materials, theme);
+    if (markers) group.add(markers);
+    const lamps = this._buildLampMesh(materials, theme);
+    if (lamps) group.add(lamps);
 
     return group;
   }
@@ -611,6 +701,101 @@ export class Track {
     const m = new THREE.Mesh(b.build(), materials.get('barrier'));
     m.name = 'barriers';
     return m;
+  }
+
+  /**
+   * The plastic posts. Flexible orange delineators with a reflective band —
+   * the cheapest possible way to say "the road is this wide" without putting
+   * anything solid at the edge of it.
+   */
+  _buildMarkerMesh(materials, theme) {
+    if (this.markers.length === 0) return null;
+    const cfg = this.data.markers || {};
+    const h = cfg.height ?? 1.05;
+    const body = new GeomBuilder();
+    const band = new GeomBuilder();
+    const post = cfg.color ?? 0xe06a2a;
+
+    for (const m of this.markers) {
+      body.addBox(
+        { x: m.x, y: m.y + h / 2, z: m.z },
+        { x: 0.11, y: h, z: 0.055 },
+        { all: post, top: shade(post, 0.18) },
+        m.rotationY
+      );
+      // Two reflective bands. On the emissive material they stay legible at
+      // night and in fog, which is the entire job of these things.
+      for (const frac of [0.78, 0.56]) {
+        band.addBox(
+          { x: m.x, y: m.y + h * frac, z: m.z },
+          { x: 0.13, y: h * 0.1, z: 0.07 },
+          0xf2f0e2,
+          m.rotationY
+        );
+      }
+    }
+
+    const g = new THREE.Group();
+    g.name = 'markers';
+    g.add(new THREE.Mesh(body.build(), materials.get('barrier')));
+    g.add(new THREE.Mesh(band.build(), materials.get('emissive')));
+    return g;
+  }
+
+  /**
+   * The lighting rig: poles with a head canted over the road. The heads are
+   * emissive so they read as "lit" even when `src/world/lighting.js` has not
+   * given this pole one of its limited real lights.
+   */
+  _buildLampMesh(materials, theme) {
+    if (this.lightAnchors.length === 0) return null;
+    const poles = new GeomBuilder();
+    const heads = new GeomBuilder();
+
+    for (const a of this.lightAnchors) {
+      const dx = a.aimX - a.x;
+      const dz = a.aimZ - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const ix = dx / len;
+      const iz = dz / len;
+      const yaw = Math.atan2(ix, iz);
+      const reach = 2.4;
+
+      poles.addCylinder({ x: a.x, y: a.y + a.height / 2, z: a.z }, 0.17, 0.12, a.height, 6, {
+        side: theme.props.post,
+        top: shade(theme.props.post, 0.1),
+      });
+      // The arm out over the road.
+      poles.addBox(
+        { x: a.x + ix * reach * 0.5, y: a.y + a.height, z: a.z + iz * reach * 0.5 },
+        { x: 0.1, y: 0.1, z: reach },
+        theme.props.post,
+        yaw
+      );
+      // Housing.
+      poles.addBox(
+        { x: a.x + ix * reach, y: a.y + a.height - 0.08, z: a.z + iz * reach },
+        { x: 0.62, y: 0.2, z: 0.9 },
+        { all: 0x2a2a2e, top: 0x3a3a40 },
+        yaw
+      );
+      // The lit face, pointing down.
+      heads.addBox(
+        { x: a.x + ix * reach, y: a.y + a.height - 0.2, z: a.z + iz * reach },
+        { x: 0.5, y: 0.06, z: 0.76 },
+        0xfff0cc,
+        yaw
+      );
+    }
+
+    const g = new THREE.Group();
+    g.name = 'lamps';
+    g.add(new THREE.Mesh(poles.build(), materials.get('barrier')));
+    const lit = new THREE.Mesh(heads.build(), materials.get('emissive').clone());
+    lit.userData.ownsMaterial = true;
+    lit.name = 'lampHeads';
+    g.add(lit);
+    return g;
   }
 }
 

@@ -89,6 +89,9 @@ export class ChaseSystem {
       });
       cop.reset(_spawn, Math.atan2(-backX, -backZ));
       cop.chassis.setSiren(true);
+      // Headlights on: two sets of beams sweeping the trees behind you is most
+      // of what makes the chase read at night.
+      cop.chassis.setHeadlights(true);
 
       const ai = new AiDriver(cop, {
         skill: 0.85,
@@ -135,6 +138,7 @@ export class ChaseSystem {
       c.ai.idle();
       this.game.audio.stopSiren(c.id);
     }
+    // Headlights stay on as they drive away — that is the last you see of them.
     this.state = 'escaped';
     this.game.audio.setMusic('alone');
     events.emit('chase:escaped', { duration: this.elapsed });

@@ -154,8 +154,8 @@ with a car, a steering input and an assertion about which way it ended up.
 src/
   config/     tuning · camera · style · gameplay · settings   ← the knobs
   core/       loop · events · input · modes · rng · mathx
-  render/     renderer · postfx · psx · materials · cameraRig · geometry
-  world/      terrain · track · scatter · props · collision · world
+  render/     renderer · postfx · psx · materials · cameraRig · geometry · lightPool
+  world/      terrain · track · scatter · props · collision · lighting · world
     tracks/   track1 · track2 · track3                ← parkours as data
   vehicle/    vehicle · chassis · ai · contacts
   audio/      procedural WebAudio — no asset files
@@ -198,21 +198,37 @@ Delete the folder and the import, and `main.js` boots straight into free roam
 with everything intact. `?skip=intro` does the same thing without deleting
 anything — **that URL is the game you are building on top of.**
 
-### The break is physics, not a cutscene
+### Parkur 3, and how it takes itself away from you
 
-There is no trigger volume and no scripted crash. Two entries in
-`src/world/tracks/track3.js` do all of it:
+The third stage is not a road. It is an unsealed dirt route through jungle with
+**no barriers at all** — its edges are marked with flexible plastic delineator
+posts that have no colliders, so you can drive straight through them. The only
+reason it is drivable is a floodlight rig hung along it.
+
+Four data entries in `src/world/tracks/track3.js` do the whole thing:
 
 ```js
-patches:  [{ from: 0.523, to: 0.612, surface: 'ICE', runoff: 34 }]
-barriers: { gaps: [{ from: 0.478, to: 0.68 }] }
+defaultSurface: 'DIRT',
+barriers: { enabled: false },
+markers:  { spacing: 8, gaps: [{ from: 0.50, to: 0.66 }] },
+lighting: { spacing: 34, gaps: [{ from: 0.50, to: 0.66 }] },
+patches:  [{ from: 0.523, to: 0.612, surface: 'SLICK', runoff: 34 }],
 ```
 
-`SURFACES.ICE.grip` is `0.12`, so the tyres make about 1.9 m/s² of cornering
-force. The corner's radius is ~115m, which needs about 12. You arrive at 150 km/h
-and the car simply does not turn. `runoff: 34` continues the ice for 34 metres
-past the tarmac, so you do not reach grippy verge a metre later and tuck back in.
-Then there is no barrier.
+The posts stop and the lights stop over the same stretch — a hole in the
+*lighting plan*, which reads as an oversight rather than a trap. Halfway round,
+the director calls `lighting.blackout()`: the rig stutters and dies, your
+headlights come on, and for a few seconds the only things in the world are two
+cones of light and a dirt road that has stopped telling you where it goes.
+
+`SURFACES.SLICK.grip` is `0.12` — wet clay — so the tyres make about 1.9 m/s² of
+cornering force. The corner's radius is ~115m, which needs about 12. You arrive
+above 140 km/h and the car simply does not turn. `runoff: 34` continues the clay
+34 metres past the edge so you do not find grip a metre later and tuck back in.
+And there is nothing at the edge to hit.
+
+The rivals keep lapping through the dark at racing speed with their lights off,
+because they were never using their eyes (`headlights` in `createChassis`).
 
 The AI rivals sail through it, because `Vehicle#ignoreSurfaces` makes the road
 always tarmac for them. They are part of the track, not competitors. The world's
@@ -248,7 +264,7 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 111 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 136 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
 collision, and the physics: 0–100, top speed, braking, understeer on ice, and a
 simulated human driving the third parkour's corner and coming off it.

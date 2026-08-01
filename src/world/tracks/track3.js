@@ -3,26 +3,31 @@
  *
  * The one that breaks.
  *
- * It is a real track and it is meant to be raced. It is faster and wider than
- * the other two, which is exactly what makes the trap work: by the time the
- * player reaches the long left-hand sweeper at roughly two thirds of a lap,
- * they are carrying more speed than they have all game.
+ * Unlike the first two, this is not a road. It is an unsealed forest track:
+ * packed dirt, no paint, no Armco. Its edges are marked with flexible plastic
+ * delineator posts, and the only reason it is drivable at all is that somebody
+ * rigged floodlights through the trees along it. `src/world/lighting.js` owns
+ * those lights, and the whole stage depends on them.
  *
- * Two data entries do all the narrative work here — there is no scripting, no
- * invisible hand, no cutscene trigger on a trigger volume:
+ * WHAT MAKES IT WORK
  *
- *   1. `patches` coats the sweeper in ICE and MUD. `SURFACES.ICE` has a grip
- *      multiplier of 0.16, so the car understeers straight on. The surface is
- *      rendered pale blue, so it is visible and, in hindsight, fair.
- *   2. `barriers.gaps` leaves that stretch of Armco out. Not broken, not
- *      knocked down. Never installed.
+ *   1. `markers` — plastic posts with NO colliders. You can drive straight
+ *      through them. Nothing at the edge of this track will save you; the posts
+ *      only tell you where the edge is.
+ *   2. `lighting` — the rig. Note the `gaps`: the run through the deep cutting
+ *      at 0.50–0.66 was never lit in the first place, which is why the darkness
+ *      lands hardest exactly there.
+ *   3. `patches` — SLICK, wet clay, through that same unlit stretch.
  *
- * The player slides wide, finds nothing there, and keeps going.
+ * Halfway round, the lights fail. The director calls
+ * `lighting.blackout()` (see `src/game/intro/introDirector.js`), the player's
+ * headlights come on, and for a few seconds the only things in the world are
+ * two cones of light and a dirt road that has stopped telling you where it goes.
+ * The clay does the rest.
  *
- * The outside of that corner faces roughly back toward the centre of the
- * valley, so the natural line of the crash carries them *into* the world rather
- * than off its edge — and the first two parkours are a few hundred metres
- * that way, still standing, still lit.
+ * The line of the slide carries out toward the centre of the valley, so the
+ * first two parkours are a few hundred metres that way — still standing, still
+ * lit, still being raced.
  */
 
 export default {
@@ -34,6 +39,11 @@ export default {
   defaultWidth: 14,
   checkpoints: 14,
   startProgress: 0.0,
+
+  /** Packed dirt for the whole stage — this was never paved. */
+  defaultSurface: 'DIRT',
+  /** No paint of any kind. The posts do the guiding. */
+  paint: { centreLine: false, edgeLines: false, kerbs: false },
 
   points: [
     { x: 572, y: 0, z: 500, width: 14 },
@@ -55,50 +65,65 @@ export default {
   ],
 
   /**
-   * THE SWEEPER — and the whole reason this track exists.
-   *
-   * The lap's fastest stretch runs from about 0.47 to 0.52 (radius ~600m, taken
-   * flat out), and it feeds straight into the tightest fast corner on the track
-   * at 0.52–0.60 (radius ~115m). On tarmac that corner is holdable at roughly
-   * 150 km/h. On ICE — grip 0.16, so about 2.5 m/s² of cornering force — it is
-   * holdable at about 60.
-   *
-   * The player arrives at 120 and up.
-   *
-   * Mud first, briefly, at turn-in: enough to unsettle the car and make them
-   * lift, which is the last honest warning they get. Then ice through the apex.
-   *
-   * If you retune the car, re-run `npm test` — the escape is asserted there,
-   * because a faster or grippier car could quietly make this corner survivable
-   * and the game would stop working with no error anywhere.
+   * NO BARRIERS. Not a gap in them — none at all, anywhere on the lap.
+   * Everything that keeps you on this track is information, not steel.
    */
-  patches: [
-    { from: 0.508, to: 0.523, surface: 'MUD', runoff: 14 },
-    // `runoff` is the important half of this. The corner is iced over for 34
-    // metres past the tarmac, so a car that runs wide does not find grippy
-    // verge a metre later and tuck back in. It just keeps going.
-    { from: 0.523, to: 0.612, surface: 'ICE', runoff: 34 },
-    { from: 0.612, to: 0.642, surface: 'MUD', runoff: 14 },
-  ],
+  barriers: { enabled: false },
 
   /**
-   * The hole in the world. Wider than the ice on both sides, so a car that
-   * lets go early *or* runs on at the exit still finds nothing to hit.
+   * The plastic posts. `gaps` stops them through the unlit cutting: the rig ran
+   * out of posts there, or nobody thought anyone would be going through it in
+   * the dark.
    */
-  barriers: {
+  markers: {
     enabled: true,
+    spacing: 8,
+    offset: 0.9,
+    height: 1.05,
+    color: 0xe06a2a,
     sides: ['left', 'right'],
-    gaps: [{ from: 0.478, to: 0.68 }],
+    gaps: [{ from: 0.5, to: 0.66 }],
   },
 
   /**
+   * The floodlight rig. Alternating sides, leaning over the road.
+   * The gap is the trap — and it is a hole in the *lighting plan*, which reads
+   * as an oversight rather than as a trap, right up until it isn't.
+   */
+  lighting: {
+    enabled: true,
+    spacing: 34,
+    offset: 5.2,
+    height: 8.5,
+    alternate: true,
+    gaps: [{ from: 0.5, to: 0.66 }],
+  },
+
+  /**
+   * Wet clay through the cutting. Same grip as ice (0.12) — the corner at
+   * ~0.55 has a radius of about 115m and needs roughly 12 m/s² to hold; the
+   * clay can supply about 1.9. `runoff` continues it past the edge of the
+   * track so a car that runs wide does not find grip a metre later.
+   *
+   * If you retune the car, run `npm test` — the escape is asserted there.
+   */
+  patches: [
+    { from: 0.5, to: 0.523, surface: 'MUD', runoff: 14 },
+    { from: 0.523, to: 0.612, surface: 'SLICK', runoff: 34 },
+    { from: 0.612, to: 0.655, surface: 'MUD', runoff: 14 },
+  ],
+
+  /**
    * Read by the intro director. Everything outside `src/game/intro/` ignores
-   * these fields entirely, so this file is still a plain track without them.
+   * these fields, so this is still a plain track without them.
    */
   breakout: {
-    /** Normalised lap position where the escape is expected. */
+    /** Lap position where the lights are cut. Just before the cutting. */
+    blackoutAt: 0.44,
+    /** How long they stay out. Long enough to lose the road, not to get bored. */
+    blackoutSeconds: 9,
+    /** Where the escape is expected. */
     at: 0.55,
-    /** Which side of the ribbon leads out. +1 = right of travel. */
     side: 1,
   },
 };

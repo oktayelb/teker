@@ -46,11 +46,16 @@ export const BEATS = {
   // -- race three -----------------------------------------------------------
   'race3.pre': [
     { subtitle: { text: 'SIRT YOLU · Parkur 3', duration: 2.6, tone: 'system' } },
-    { subtitle: { text: 'Last one. Faster than the others.', duration: 2.8 } },
+    { subtitle: { text: 'Not a road. Dirt, posts, and the lights they hung for you.', duration: 3.4 } },
   ],
-  /** Played once, as the player first reaches the pale stretch of road. */
+  /** The rig fails. Played the instant the lights go. */
+  'race3.blackout': [
+    { subtitle: { text: 'The lights go out.', duration: 2.0, tone: 'system' } },
+    { subtitle: { text: 'All of them, at once, for a long way ahead.', duration: 3.0 } },
+  ],
+  /** Played once, as the player first reaches the wet stretch. */
   'race3.ice': {
-    subtitle: { text: 'Something is wrong with this corner.', duration: 2.4 },
+    subtitle: { text: 'The road has stopped telling you where it goes.', duration: 2.6 },
   },
 
   // -- the break ------------------------------------------------------------

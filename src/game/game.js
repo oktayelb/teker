@@ -102,6 +102,7 @@ export class Game {
       materials: this.materials,
       theme: this.renderer.theme,
       seed: this.boot.seed ?? OPEN_WORLD.seed,
+      lightPool: this.renderer.lights,
     });
     this.camera.world = this.world;
 
@@ -169,6 +170,7 @@ export class Game {
       kind,
       color,
       halfExtents: v.tuning.halfExtents,
+      lightPool: this.renderer.lights,
     });
     v.attachChassis(chassis);
     this.renderer.scene.add(v.object);
@@ -191,6 +193,8 @@ export class Game {
     const i = this.vehicles.indexOf(vehicle);
     if (i >= 0) this.vehicles.splice(i, 1);
     this._drivers.delete(vehicle);
+    // Give the leased lights back, or the pool drains after a few respawns.
+    vehicle.chassis?.dispose?.();
     this.renderer.scene.remove(vehicle.object);
     vehicle.object.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
@@ -236,7 +240,7 @@ export class Game {
     this.time += dt;
     const inputState = this.input.update(dt);
     this.renderer.update(dt);
-    this.world?.update(dt, this.time);
+    this.world?.update(dt, this.time, this.renderer.camera.position);
     this.modes.update(dt);
     this.camera.update(dt, inputState);
     // The UI runs on real time so it keeps animating through pause and slow-mo.

@@ -78,7 +78,7 @@ export class OpenWorldMode extends Mode {
   _defaultSpawn() {
     const w = this.ctx.world;
     const t = w.getTrack('track3') || w.tracks.values().next().value;
-    const slot = t.gridSlot(0, 7, 4.2);
+    const slot = t.gridSlot(0, 7, 4.2, 14);
     return slot;
   }
 

@@ -20,6 +20,7 @@ import { Terrain } from './terrain.js';
 import { Track, ROAD } from './track.js';
 import { Scatter } from './scatter.js';
 import { CollisionGrid } from './collision.js';
+import { TrackLighting } from './lighting.js';
 import { OPEN_WORLD } from '../config/gameplay.js';
 import { surfaceById } from '../config/tuning.js';
 import { clamp01, lerp, smoothstep } from '../core/mathx.js';
@@ -34,8 +35,9 @@ export class World {
    * @param {object} opts.theme resolved theme
    * @param {number} [opts.seed]
    */
-  constructor({ materials, theme, seed = OPEN_WORLD.seed }) {
+  constructor({ materials, theme, seed = OPEN_WORLD.seed, lightPool = null }) {
     this.materials = materials;
+    this.lightPool = lightPool;
     this.theme = theme;
     this.seed = seed;
 
@@ -51,6 +53,8 @@ export class World {
     this.scatter = null;
     /** @type {{name:string,position:THREE.Vector3,radius:number,discovered:boolean}[]} */
     this.landmarks = [];
+    /** @type {Map<string, TrackLighting>} tracks that carry a lighting rig */
+    this.lighting = new Map();
 
     this._trackList = [];
     this._trackGroups = new Map();
@@ -112,6 +116,11 @@ export class World {
         this._trackGroups.set(t.id, g);
         this.root.add(g);
         this.collision.insertAll(t.colliders);
+        // A track with a lighting rig gets a system to run it. Note the plastic
+        // markers are deliberately NOT added to the collision grid.
+        if (this.lightPool && t.lightAnchors.length > 0) {
+          this.lighting.set(t.id, new TrackLighting({ track: t, pool: this.lightPool, group: g }));
+        }
       }
     });
 
@@ -335,11 +344,12 @@ export class World {
     return new THREE.Vector3(x, h + 1.5, z);
   }
 
-  update(dt, time) {
+  update(dt, time, cameraPosition = null) {
     // The mast lamp blinks on its own schedule, forever, for no one.
     if (this._mastLamp) {
       this._mastLamp.visible = Math.sin(time * 1.6) > 0.3;
     }
+    for (const rig of this.lighting.values()) rig.update(dt, cameraPosition);
   }
 
   applyTheme(theme) {
@@ -348,6 +358,8 @@ export class World {
   }
 
   dispose() {
+    for (const rig of this.lighting.values()) rig.dispose();
+    this.lighting.clear();
     this.terrain?.dispose();
     this.scatter?.dispose();
     this.collision.clear();
