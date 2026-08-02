@@ -245,6 +245,25 @@ the question the sirens ask.
 
 `CHASE.mercyAfter` guarantees you win eventually. It is a scene, not a skill check.
 
+### The forest is scenery until you have earned it
+
+Hit a tree hard enough and it comes down on the car and stays there: a car wearing
+a pine is not a car, and cops drive past it (`world/trees.js`, `TREES` in
+`gameplay.js`). Damage is kinetic energy and it accumulates, so a trunk you cannot
+fell in one go can be worried down in three, and a damaged one leans and darkens
+in exact proportion to what it has taken — that lean is the only health bar there is.
+
+None of it is switched on during the opening. `TREES.breakableBy` waits for
+`chase:escaped`: through all three races and the first chase a tree is furniture
+that stops a car and hides one, nothing more. The first chase is meant to be won
+by breaking line of sight, and a forest that visibly comes apart during a *race*
+teaches the wrong game. Only the player's car can ever hurt a trunk
+(`TREES.playerOnly`) — otherwise the recovery units fell trees onto themselves.
+
+The disguise only works parked (`TREES.disguiseSpeed`), which would make it a trap
+if there were no way out: handbrake and throttle together, held, shrugs the cover
+off and leaves it standing where you dropped it (`Trees#update`).
+
 ---
 
 ## Where to continue

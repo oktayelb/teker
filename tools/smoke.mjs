@@ -627,7 +627,33 @@ if (tree) {
   const capacity = tree.radius * TREES.capacityPerRadius;
   const survivable = Math.sqrt((2 * capacity * 0.4) / 1100);
 
+  // -- before the forest is armed, none of the above is true ----------------
+  //
+  // A fresh World has taken no `chase:escaped` / `intro:finished`, which is the
+  // state the whole opening is played in: trees stop cars and hide them, and
+  // nothing else. This is the check that the races cannot be spent knocking the
+  // scenery down. See TREES.breakableBy.
+  ok('a fresh forest takes no damage', world.trees.breakable === false);
+  const early = new Vehicle({ profile: 'hatchback', world, id: 'early' });
+  early.isPlayer = true;
+  early.reset(new THREE.Vector3(tree.x, 0, tree.z - 9), 0);
+  early.velocity.set(0, 0, 34);
+  simulate(early, 120, () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0 }));
+  ok('…so a flat-out hit before the first escape does nothing at all',
+    !tree.felled && !tree.damage, `damage=${Math.round(tree.damage || 0)} J`);
+  ok('…and it is still standing in the way', early.position.z < tree.z + 4);
+
+  // -- and cops never get to fell one, armed or not -------------------------
+  world.trees.allowDamage();
+  const cop = new Vehicle({ profile: 'cruiser', world, id: 'cop-test' });
+  cop.reset(new THREE.Vector3(tree.x, 0, tree.z - 9), 0);
+  cop.velocity.set(0, 0, 34);
+  simulate(cop, 120, () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0 }));
+  ok('a cop cannot damage a tree even once the forest is armed',
+    !tree.felled && !tree.damage, `damage=${Math.round(tree.damage || 0)} J`);
+
   const hitCar = new Vehicle({ profile: 'hatchback', world, id: 'crash' });
+  hitCar.isPlayer = true;
   hitCar.reset(new THREE.Vector3(tree.x, 0, tree.z - 9), 0);
   hitCar.velocity.set(0, 0, survivable);
   simulate(hitCar, 120 * 3, () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0 }));
@@ -642,15 +668,72 @@ if (tree) {
     !tree.felled,
     `${Math.round((tree.damage || 0) / 1000)} kJ / ${Math.round(capacity / 1000)} kJ`
   );
+  // -- the lean IS the damage, drawn ----------------------------------------
+  //
+  // A trunk on the way down has to read as one from a moving car with no health
+  // bar anywhere on the screen. So the tilt is not decoration: it is exactly
+  // damage/capacity of TREES.maxLean, and a trunk that has taken twice as much
+  // leans twice as far. Measured as the angle between the trunk's up vector
+  // before and after, which is what the player actually sees.
+  const bend = world.scatter.colliders.find(
+    (c) => c !== tree && c.type === 'cylinder' && c.radius > 0.8 && c.mesh && !c.felled
+  );
+  if (bend) {
+    const _p = new THREE.Vector3();
+    const _r = new THREE.Quaternion();
+    const _s = new THREE.Vector3();
+    const upOf = (m) => {
+      m.decompose(_p, _r, _s);
+      return new THREE.Vector3(0, 1, 0).applyQuaternion(_r);
+    };
+    const rest = upOf(bend.baseMatrix);
+    const leanNow = () => {
+      const m = new THREE.Matrix4();
+      bend.mesh.getMatrixAt(bend.instance, m);
+      return rest.angleTo(upOf(m));
+    };
+
+    world.onImpact(hitCar, bend, 40000);
+    const lean1 = leanNow();
+    const t1 = bend.damage / bend.capacity;
+    world.onImpact(hitCar, bend, 40000);
+    const lean2 = leanNow();
+    const t2 = bend.damage / bend.capacity;
+
+    ok('a damaged trunk leans by its share of its capacity',
+      Math.abs(lean1 - t1 * TREES.maxLean) < 0.02,
+      `${lean1.toFixed(3)} rad at ${Math.round(t1 * 100)}% spent`);
+    ok('…and a second hit bends it further, by the same rule',
+      lean2 > lean1 && Math.abs(lean2 - t2 * TREES.maxLean) < 0.02,
+      `${lean2.toFixed(3)} rad at ${Math.round(t2 * 100)}% spent`);
+    ok('…without felling it', !bend.felled);
+  }
 
   // Now hit it properly.
   const ram = new Vehicle({ profile: 'hatchback', world, id: 'ram' });
+  ram.isPlayer = true;
   ram.reset(new THREE.Vector3(tree.x, 0, tree.z - 9), 0);
   ram.velocity.set(0, 0, 30);
   simulate(ram, 120, () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0 }));
   ok('a hard enough hit fells the tree', !!tree.felled,
     `${Math.round((tree.damage || 0) / 1000)} kJ / ${Math.round(capacity / 1000)} kJ`);
   ok('a felled tree leaves no hitbox', tree.disabled === true && tree.blocksSight === false);
+
+  // -- what actually flips the switch ---------------------------------------
+  //
+  // The forest listens for the story rather than being told by it: `Trees` never
+  // imports the chase and the chase never mentions trees. That wire is the whole
+  // gate, so it is worth one check on a throwaway instance.
+  const { Trees } = await import('../src/world/trees.js');
+  const { events } = await import('../src/core/events.js');
+  const forest = new Trees();
+  ok('a new forest starts unbreakable', forest.breakable === false && forest.armed === false);
+  events.emit('chase:started', {});
+  ok('the sirens arm the disguise, but not the axe',
+    forest.armed === true && forest.breakable === false);
+  events.emit('chase:escaped', {});
+  ok('ditching the first cops is what makes the forest breakable', forest.breakable === true);
+  forest.dispose();
 }
 
 // ---------------------------------------------------------------------------

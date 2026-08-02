@@ -102,6 +102,10 @@ export const BREAKOUT = {
  *
  * Damage ACCUMULATES: a trunk remembers every hit it has taken, so a tree you
  * cannot fell in one go can be worried down in three.
+ *
+ * None of it is switched on at the start. See `breakableBy`: until the first
+ * cops are shaken off, every number below is dormant and a tree is just a thing
+ * you should not have driven into.
  */
 export const TREES = {
   /** Prop kinds with a trunk worth breaking. Rocks and signs are not trees. */
@@ -170,11 +174,52 @@ export const TREES = {
    */
   disguiseSpeed: 4.0,
   /**
+   * Shrugging the cover off: handbrake AND throttle, held together for `hold`
+   * seconds. A car that stands on the brake and the loud pedal at once is a car
+   * that means it, which is exactly the point — the disguise is a trap as well
+   * as a tool (it only works parked), so the way out of it must be deliberate
+   * enough never to fire by accident and quick enough to use with sirens
+   * closing. Both pedals are already read every step; this needs no new key.
+   *
+   * The hold is what separates "I want out of this" from "I am pulling away
+   * gently while still hidden", which is a thing the player is allowed to do.
+   */
+  shed: { throttle: 0.5, handbrake: 0.5, hold: 0.35 },
+  /**
+   * Only the car the human is driving can hurt a trunk.
+   *
+   * Without this the recovery units plough through the forest during the chase
+   * and fell trees themselves — and a felled tree lands on whatever felled it,
+   * so the cops end up wearing pines. The disguise is the player's answer to
+   * the chase; handing it to the chase is a joke, not a mechanic.
+   */
+  playerOnly: true,
+  /**
+   * Trunks are indestructible until the first cops are off you.
+   *
+   * Before that a tree is furniture: it stops a car, it hides a car, and that
+   * is all it does. The whole forest going soft during the races would teach
+   * the player that scenery is destructible at exactly the moment the game is
+   * pretending to be a racing game — and the first chase is meant to be won by
+   * breaking line of sight, not by wearing a hat. So the tree damage model,
+   * the lean, the splintering and the disguise all switch on together, once,
+   * as the reward for getting away.
+   *
+   * `intro:finished` is the second entry for the no-story paths (`?skip=intro`,
+   * the free-roam menu option), where no chase ever happens and the forest
+   * would otherwise stay solid forever. Same reasoning as `WILDLIFE.armedBy`.
+   */
+  breakableBy: ['chase:escaped', 'intro:finished'],
+  /**
    * Wearing a felled tree only becomes possible once there is something to hide
    * from — `chase:started`. Before that, trees still come down when you hit
    * them hard enough; they just do not end up on the roof. Handing the player a
    * disguise during the races would explain a mechanic before the story has
    * given them any reason to want it.
+   *
+   * In the told story this is strictly earlier than `breakableBy` above, so it
+   * is `breakableBy` that decides when the disguise first becomes reachable.
+   * It matters on its own in free roam, where no chase has ever started.
    */
   armedBy: 'chase:started',
 };

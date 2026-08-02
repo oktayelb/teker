@@ -46,7 +46,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 
-**All phases complete.** `npm test` → 136/136, and it renders. See `README.md` for
+**All phases complete.** `npm test` → 151/151, and it renders. See `README.md` for
 how to tune it and where to build the next act.
 
 ## Status log

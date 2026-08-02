@@ -4,6 +4,8 @@
  * Drives the player into a real tree at real speeds and checks the whole chain:
  * momentum accumulates, a soft tap does nothing, a hard hit fells it, the tree
  * ends up on the car, its collider stops existing, and the cops stop seeing it.
+ * Then that the player can take the thing off again — handbrake and throttle
+ * together — and that it is left standing where they shrugged it off.
  *
  * Screenshots (if SHOTS is set) go OUTSIDE the repo.
  *
@@ -48,7 +50,7 @@ try {
   await page.evaluate(() => {
     const g = TEKERLEK.game;
     window.__log = [];
-    for (const ev of ['tree:damaged', 'tree:felled', 'vehicle:disguised'])
+    for (const ev of ['tree:damaged', 'tree:felled', 'vehicle:disguised', 'vehicle:undisguised'])
       TEKERLEK.events.on(ev, (p) => window.__log.push(`${ev}:${p.kind ?? ''}`));
 
     /** Find a fellable tree the player can be aimed at. */
@@ -110,6 +112,14 @@ try {
 
   const tree = () => page.evaluate(() => window.__tree(window.__t));
   const player = () => page.evaluate(() => window.__player());
+
+  // -- 0. the forest is only breakable once the story says so ---------------
+  //
+  // Free roam has no cops to ditch, so `intro:finished` arms it at boot (see
+  // TREES.breakableBy). Everything below depends on that having happened.
+  console.log('\n— the forest is armed at all —');
+  check('free roam arms the damage model at boot',
+    await page.evaluate(() => TEKERLEK.game.world.trees.breakable === true));
 
   // -- 1. a gentle nudge must not damage anything ---------------------------
   //
@@ -205,6 +215,61 @@ try {
   check('…and it sits level, with no slope', p.pitch === 0 && p.roll === 0,
     `pitch=${p.pitch} roll=${p.roll}`);
   console.log('    events:', await page.evaluate(() => window.__log.join(' | ')));
+
+  // -- 4c. handbrake + throttle takes it off again --------------------------
+  //
+  // The disguise only works parked, so a player who no longer wants it would
+  // otherwise be stuck with it. Both pedals together, held, is the way out.
+  console.log('\n— shrugging the cover off —');
+  const shed = await page.evaluate(async () => {
+    const g = TEKERLEK.game;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const scene = g.renderer.scene;
+    const inWorld = () => scene.children.filter((o) => o.name?.startsWith('fallen:')).length;
+    const before = { disguised: !!g.player.disguised, onCar: g.player.object.children.filter((o) => o.name?.startsWith('fallen:')).length, inWorld: inWorld() };
+
+    // Throttle alone must not do it — otherwise the player sheds the cover the
+    // moment they try to creep away from a hiding place still wearing it.
+    const onlyGas = g.input.pushOverride((s) => { s.throttle = 1; s.handbrake = 0; });
+    await sleep(900);
+    const gasOnly = { disguised: !!g.player.disguised };
+    onlyGas();
+
+    // Both, held past TREES.shed.hold.
+    const release = g.input.pushOverride((s) => { s.throttle = 1; s.handbrake = 1; });
+    await sleep(900);
+    release();
+    return {
+      before,
+      gasOnly,
+      after: {
+        disguised: !!g.player.disguised,
+        onCar: g.player.object.children.filter((o) => o.name?.startsWith('fallen:')).length,
+        inWorld: inWorld(),
+      },
+    };
+  });
+  console.log('   ', JSON.stringify(shed));
+  check('the gas alone does not shed the cover', shed.gasOnly.disguised === true);
+  check('handbrake + throttle sheds it', shed.after.disguised === false);
+  check('…it comes off the car', shed.before.onCar === 1 && shed.after.onCar === 0);
+  check('…and is left standing in the world rather than deleted',
+    shed.after.inWorld === shed.before.inWorld + 1);
+  check('…and it is announced, so anything watching can react',
+    await page.evaluate(() => window.__log.some((l) => l.startsWith('vehicle:undisguised'))));
+
+  if (SHOTS) {
+    // Pull away and look back at what was left behind.
+    await page.evaluate(async () => {
+      const g = TEKERLEK.game;
+      g.camera.setRig('chaseWide');
+      const release = g.input.pushOverride((s) => { s.throttle = 1; });
+      await new Promise((r) => setTimeout(r, 3200));
+      release();
+    });
+    await sleep(2000);
+    await page.screenshot({ path: `${SHOTS}/tree-shed.png` });
+  }
 
   // -- 4b. a damaged tree must LOOK damaged ---------------------------------
   console.log('\n— a damaged tree is visibly different —');

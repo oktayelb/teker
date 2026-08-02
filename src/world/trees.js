@@ -8,7 +8,19 @@
  * When it does come down, it comes down ON THE CAR, and it stays there. That is
  * not a flourish: a car wearing a pine is not a car any more, and getting out
  * of sight of the recovery units is the only thing you have. See
- * `src/game/chase.js` for the half of this that the cops care about.
+ * `src/game/chase.js` for the half of this that the cops care about. Wearing it
+ * is not a life sentence — handbrake and throttle together shrug it off, see
+ * `update` — because a disguise that can only be worn while parked would
+ * otherwise be a trap.
+ *
+ * NONE OF IT IS ON AT THE START
+ * -----------------------------
+ * Two switches, both flipped by events this file never looks for on purpose:
+ * `breakable` (a trunk can be hurt at all) and `armed` (a felled one gets worn).
+ * Until the first cops are shaken off, neither is set — the forest takes no
+ * damage, leans nowhere, and simply stops cars. And only the player's car is
+ * ever allowed to hurt a trunk, or the recovery units would fell trees onto
+ * themselves. See `TREES.breakableBy` / `armedBy` / `playerOnly`.
  *
  * WHAT A TREE IS, HERE
  * --------------------
@@ -39,16 +51,34 @@ export class Trees {
   constructor() {
     /** Trees currently lying on a vehicle, so they can be cleaned up. */
     this._worn = new Map();
+    /** Covers the player has shrugged off, left standing in the world. */
+    this._dropped = [];
     /** Canopy geometries we built ourselves, and therefore have to dispose. */
     this._canopies = [];
+    /**
+     * Until this is true a trunk cannot be hurt at all: no damage kept, no
+     * lean, no splintering, nothing comes down. The forest is scenery you
+     * should not drive into and nothing more. Armed by `TREES.breakableBy` —
+     * see the config for why the whole model waits for the first escape.
+     */
+    this.breakable = false;
     /**
      * Until this is true, trees fall but nobody wears them. Armed by an event
      * (`TREES.armedBy`, currently `chase:started`) rather than by a call, so
      * this file needs to know nothing about the chase — or that a story exists.
      */
     this.armed = false;
+    /** The shed prompt is a one-time thing. See `_wear`. */
+    this._toldHowToShed = false;
     this.subs = new Subscriptions();
-    this.subs.on(TREES.armedBy, () => this.arm());
+    for (const ev of [].concat(TREES.breakableBy)) this.subs.on(ev, () => this.allowDamage());
+    for (const ev of [].concat(TREES.armedBy)) this.subs.on(ev, () => this.arm());
+  }
+
+  /** Let trunks start taking damage. Nothing before this point marks them. */
+  allowDamage() {
+    this.breakable = true;
+    return this;
   }
 
   /** Allow felled trees to be worn from here on. */
@@ -77,6 +107,12 @@ export class Trees {
    * @returns {'none'|'damaged'|'felled'}
    */
   impact(vehicle, collider, energy) {
+    // Nothing marks a tree before the forest is armed — see `TREES.breakableBy`.
+    // The collider is untouched either way, so the trunk still stops the car and
+    // still hides it; it simply does not remember being hit.
+    if (!this.breakable) return 'none';
+    // And only ever the player. A cop that fells a tree ends up wearing it.
+    if (TREES.playerOnly && !vehicle?.isPlayer) return 'none';
     if (!Trees.isFellable(collider) || collider.felled) return 'none';
     if (!(energy > TREES.minImpactEnergy)) return 'none';
 
@@ -206,11 +242,22 @@ export class Trees {
     tree.position.set(0, -(vehicle.tuning?.rideHeight ?? half.y), 0);
 
     vehicle.object.add(tree);
-    this._worn.set(vehicle, { tree, collider, spare: false });
+    this._worn.set(vehicle, { tree, collider, spare: false, shedHold: 0 });
 
     // The flag the rest of the game reads. See chase.js `_canSee`.
     vehicle.disguised = true;
     events.emit('vehicle:disguised', { id: vehicle.id, kind: collider.kind });
+    // A mechanic with no way out is a bug as far as the player is concerned, and
+    // nothing else in the game would ever mention this one. Said once, in the
+    // same register as the other control prompts (see `FARLAR`, `KAMERA`).
+    if (vehicle.isPlayer && !this._toldHowToShed) {
+      this._toldHowToShed = true;
+      events.emit('ui:subtitle', {
+        text: 'GİZLENDİN · ATMAK İÇİN BOŞLUK + GAZ',
+        duration: 3.4,
+        tone: 'system',
+      });
+    }
   }
 
   /**
@@ -300,6 +347,64 @@ export class Trees {
     return built;
   }
 
+  /**
+   * Per-frame, and the only thing it watches for is the player asking to be a
+   * car again.
+   *
+   * The disguise is a trap as much as a tool: it only works while you are
+   * barely moving, so a player who has been driven under a tree they no longer
+   * want is stuck wearing it. Handbrake and throttle together — both pedals,
+   * meant — held for `TREES.shed.hold`, takes it off. The hold is the whole
+   * design: it is long enough that pulling away gently from a hiding place
+   * (which stays hidden, see `disguiseSpeed`) never sheds by accident, and
+   * short enough to be worth doing with a siren behind you.
+   */
+  update(dt) {
+    if (this._worn.size === 0) return;
+    const S = TREES.shed;
+    // Deleting from a Map while iterating it is safe, which is what `shed` does.
+    for (const [vehicle, worn] of this._worn) {
+      const cmd = vehicle.command;
+      const asking = !!cmd && cmd.handbrake > S.handbrake && cmd.throttle > S.throttle;
+      worn.shedHold = asking ? worn.shedHold + dt : 0;
+      if (worn.shedHold >= S.hold) this.shed(vehicle);
+    }
+  }
+
+  /**
+   * Take the cover off and leave it where the car was standing.
+   *
+   * It is reparented rather than deleted, keeping its world transform, so it
+   * does not blink out: it stops riding the car and starts being a thing in the
+   * forest, at the exact spot it was shrugged off. Its skirt was already sitting
+   * on the ground (see `_wear`), so it needs no repositioning to look dropped.
+   *
+   * Still no collider. It was not one on the roof and it is not one here — a
+   * player who sheds a tree onto themselves must not then be parked inside a
+   * wall of their own making.
+   *
+   * @returns {boolean} whether there was anything to take off
+   */
+  shed(vehicle) {
+    const worn = this._worn.get(vehicle);
+    if (!worn) return false;
+
+    const parent = vehicle.object?.parent;
+    if (parent) {
+      // `attach`, not `add`: `add` would keep the local transform and snap the
+      // cover to the world origin.
+      parent.attach(worn.tree);
+      this._dropped.push(worn.tree);
+    } else {
+      worn.tree.removeFromParent();
+    }
+
+    this._worn.delete(vehicle);
+    vehicle.disguised = false;
+    events.emit('vehicle:undisguised', { id: vehicle.id, kind: worn.collider.kind });
+    return true;
+  }
+
   /** Drop a vehicle's tree — used when vehicles are cleared between modes. */
   release(vehicle) {
     const worn = this._worn.get(vehicle);
@@ -313,6 +418,8 @@ export class Trees {
     this.subs.dispose();
     for (const [vehicle] of this._worn) this.release(vehicle);
     this._worn.clear();
+    for (const t of this._dropped) t.removeFromParent();
+    this._dropped.length = 0;
     // These are ours — the shared instanced geometry is not, and must be left
     // well alone. See Game#despawnVehicle for the other half of that rule.
     for (const g of this._canopies) g.dispose();

@@ -375,6 +375,9 @@ export class World {
 
   update(dt, time, cameraPosition = null) {
     this.wildlife?.update(dt, cameraPosition);
+    // Watches for the player shrugging off a worn tree. Costs nothing while
+    // nobody is wearing one, which is almost always.
+    this.trees.update(dt);
     // The mast lamp blinks on its own schedule, forever, for no one.
     if (this._mastLamp) {
       this._mastLamp.visible = Math.sin(time * 1.6) > 0.3;
