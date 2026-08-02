@@ -643,10 +643,14 @@ export class AudioEngine {
     this._failed = false; // WebAudio unavailable or init threw
     this._disposed = false;
 
-    // Mix state
+    // Mix state. Like the ambience/music names below, `_busScale` is a *desire*
+    // and deliberately outlives the graph: dispose() throws the GainNodes away,
+    // the player's chosen mix stays.
     this._volume = AUDIO_CONFIG.MASTER.volume;
     this._muted = AUDIO_CONFIG.MASTER.muted;
     this._duck = 0;
+    /** @type {Record<string, number>} bus name → player scale on MASTER.busVolumes */
+    this._busScale = {};
 
     // Graph handles, all created in init()
     this._master = null;
@@ -917,7 +921,8 @@ export class AudioEngine {
    * @param {number} scale 0..1 (values above 1 are allowed but will clip sooner)
    */
   setBusVolume(name, scale) {
-    this._busScale = this._busScale || {};
+    // Remembered even when it cannot be applied — `_realiseDesiredState()`
+    // replays it onto the real node the moment the context starts running.
     this._busScale[name] = scale;
     const base = AUDIO_CONFIG.MASTER.busVolumes[name];
     const node = this._bus?.[name];
@@ -2113,6 +2118,23 @@ export class AudioEngine {
   _realiseDesiredState() {
     if (!this._live) return;
     try {
+      // The mix goes FIRST, so anything built below is born at the right level.
+      //
+      // This replay is the whole reason the player's sound settings survive.
+      // `Game#init` restores them from localStorage and applies them before any
+      // gesture has happened, i.e. while the context is still suspended — and
+      // `setBusVolume` bails out before touching the GainNode when it is not
+      // `_live`. Skip this and the sliders read back the saved value while the
+      // buses sit on their `AUDIO_CONFIG.MASTER.busVolumes` defaults for the
+      // entire session: the menu agrees with the player, the sound does not,
+      // and the only way out is to drag every slider a second time. Master and
+      // mute never showed it, because `_applyMasterGain()` does not gate on
+      // `_live` — which made it look like *some* of the settings worked.
+      this._applyMasterGain();
+      for (const [name, scale] of Object.entries(this._busScale)) {
+        this.setBusVolume(name, scale);
+      }
+
       if (this._engineWanted && !this._eng) this.startEngine();
       if (this._ambienceName !== 'none' && !this._amb) this._applyAmbience();
       if (this._musicName !== 'none' && !this._music) this._applyMusic();

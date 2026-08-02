@@ -283,10 +283,11 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 136 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 167 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
-collision, and the physics: 0–100, top speed, braking, understeer on ice, and a
-simulated human driving the third parkour's corner and coming off it.
+collision, the settings round trip, and the physics: 0–100, top speed, braking,
+understeer on ice, and a simulated human driving the third parkour's corner and
+coming off it.
 
 ### Bugs it caught, and one it could not
 

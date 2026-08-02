@@ -46,7 +46,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 
-**All phases complete.** `npm test` → 151/151, and it renders. See `README.md` for
+**All phases complete.** `npm test` → 167/167, and it renders. See `README.md` for
 how to tune it and where to build the next act.
 
 ## Status log
@@ -138,6 +138,17 @@ how to tune it and where to build the next act.
 15. **Light intensities again.** `LIGHTING.intensity: 120` lit nothing; the
     physical units need ~520 for a lamp 8m up over a night-albedo ground.
     Whenever a light "does not work", check the magnitude before the wiring.
+16. **The saved sound settings never reached the mix.** `Game#init` restores
+    them and applies them *before* the first gesture, so the AudioContext is
+    still suspended — and `setBusVolume` remembers the scale but returns
+    before touching the GainNode when it is not `_live`.
+    `_realiseDesiredState()`, whose entire job is replaying what was asked for
+    during the suspension, did not replay `_busScale`, so the buses stayed on
+    their `AUDIO_CONFIG.MASTER.busVolumes` defaults for the whole session.
+    The slider read back the saved value while the sound did not match it —
+    a setting that *looks* applied is worse than one that visibly failed.
+    Master and mute hid it by working, because `_applyMasterGain()` does not
+    gate on `_live`. Anything deferred past unlock has to be replayed there.
 
 ## Tooling note
 
