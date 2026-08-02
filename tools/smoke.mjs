@@ -314,7 +314,7 @@ ok(
 );
 
 // -- THE ESCAPE --------------------------------------------------------------
-const { BREAKOUT } = await import('../src/config/gameplay.js');
+const { BREAKOUT, TREES } = await import('../src/config/gameplay.js');
 const q = {};
 
 /**
@@ -617,12 +617,40 @@ if (tree) {
   ok('collision grid reports empty space as empty', !world.collide(clear, 1.7));
 
   // Then drive into it from close range, where terrain drift cannot make us miss.
+  //
+  // Speed matters now: a trunk has a capacity, and past it the tree comes down
+  // on the car and takes its collider with it (see world/trees.js). So "solid"
+  // has to be tested below that line, and felling tested above it.
+  // Capacity is joules now, so the survivable speed comes back through
+  // v = sqrt(2E/m). Well under one trunk's worth, with room for the extra hits
+  // that three seconds of shoving at full throttle lands on top of it.
+  const capacity = tree.radius * TREES.capacityPerRadius;
+  const survivable = Math.sqrt((2 * capacity * 0.4) / 1100);
+
   const hitCar = new Vehicle({ profile: 'hatchback', world, id: 'crash' });
   hitCar.reset(new THREE.Vector3(tree.x, 0, tree.z - 9), 0);
-  hitCar.velocity.set(0, 0, 22);
+  hitCar.velocity.set(0, 0, survivable);
   simulate(hitCar, 120 * 3, () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0 }));
   const passedThrough = hitCar.position.z > tree.z + 4;
-  ok('trees are solid', !passedThrough, passedThrough ? 'drove straight through' : 'stopped by the trunk');
+  ok(
+    'trees are solid below their capacity',
+    !passedThrough && !tree.felled,
+    passedThrough ? 'drove straight through' : `stopped by the trunk at ${survivable.toFixed(1)} m/s`
+  );
+  ok(
+    'leaning on a trunk at full throttle does not fell it',
+    !tree.felled,
+    `${Math.round((tree.damage || 0) / 1000)} kJ / ${Math.round(capacity / 1000)} kJ`
+  );
+
+  // Now hit it properly.
+  const ram = new Vehicle({ profile: 'hatchback', world, id: 'ram' });
+  ram.reset(new THREE.Vector3(tree.x, 0, tree.z - 9), 0);
+  ram.velocity.set(0, 0, 30);
+  simulate(ram, 120, () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0 }));
+  ok('a hard enough hit fells the tree', !!tree.felled,
+    `${Math.round((tree.damage || 0) / 1000)} kJ / ${Math.round(capacity / 1000)} kJ`);
+  ok('a felled tree leaves no hitbox', tree.disabled === true && tree.blocksSight === false);
 }
 
 // ---------------------------------------------------------------------------

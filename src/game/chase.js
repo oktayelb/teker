@@ -24,7 +24,7 @@
 import * as THREE from 'three';
 import { AiDriver } from '../vehicle/ai.js';
 import { events } from '../core/events.js';
-import { CHASE } from '../config/gameplay.js';
+import { CHASE, TREES } from '../config/gameplay.js';
 import { clamp, clamp01, lerp, shortestAngle } from '../core/mathx.js';
 
 const _toPlayer = new THREE.Vector3();
@@ -241,6 +241,13 @@ export class ChaseSystem {
 
   _canSee(cop) {
     const t = this.target;
+
+    // A tree came down on the car and stayed there. Sitting still under it, you
+    // are a fallen pine and they drive past. Moving, you are a fallen pine doing
+    // 60 km/h, which is worse than no disguise at all — so this only holds while
+    // the car is barely rolling. `TREES.disguiseSpeed` is that line.
+    if (t.disguised && t.speed < TREES.disguiseSpeed) return false;
+
     const dx = t.position.x - cop.position.x;
     const dz = t.position.z - cop.position.z;
     const dist = Math.hypot(dx, dz);

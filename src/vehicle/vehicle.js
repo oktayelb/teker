@@ -100,6 +100,8 @@ export class Vehicle {
     this.localAccel = new THREE.Vector2(0, 0);
     this.airTime = 0;
     this.disabled = false;
+    /** A tree came down on this car and is still lying on it. See world/trees.js. */
+    this.disguised = false;
     /**
      * When true the car always drives on TARMAC, whatever it is actually on.
      *
@@ -464,7 +466,9 @@ export class Vehicle {
     for (let i = 0; i < this.collisionProbes.length; i++) {
       const hit = this.world.collide(this.probePosition(i), this.collisionRadius);
       if (hit && (!best || hit.depth > best.depth)) {
-        best = { normal: _hitNormal.copy(hit.normal), depth: hit.depth };
+        // Keep the collider: what was hit matters, not just that something was.
+        // A trunk keeps score of the hits it takes — see world/trees.js.
+        best = { normal: _hitNormal.copy(hit.normal), depth: hit.depth, collider: hit.collider };
         bestProbe = this.collisionProbes[i];
       }
     }
@@ -487,6 +491,16 @@ export class Vehicle {
       const intensity = clamp01((-into * headOn) / 18);
       if (intensity > 0.05 && this._collisionCooldown <= 0) {
         this._collisionCooldown = 0.12;
+        // Report the blow to the world as kinetic energy along the normal,
+        // ½mv² in joules — not momentum. Damage that goes with the square of
+        // speed is what makes "hard enough" mean anything.
+        //
+        // The cooldown above is what makes this one *hit* rather than one per
+        // physics step: a car leaning on a trunk at 120Hz would otherwise fell
+        // it instantly.
+        if (hit.collider && this.world.onImpact) {
+          this.world.onImpact(this, hit.collider, 0.5 * T.mass * into * into);
+        }
         events.emit('camera:shake', { source: 'collision', scale: intensity });
         events.emit('vehicle:collision', {
           id: this.id,

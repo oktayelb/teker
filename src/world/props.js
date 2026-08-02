@@ -50,6 +50,9 @@ export function createPine(theme, rng, scaleHint = 1) {
     collider: { type: 'cylinder', radius: trunkR * 3.2, height: height * 0.9, yOffset: height * 0.45, blocksSight: true },
     tag: 'pine',
     height,
+    /** Local Y where the trunk stops and the canopy starts. See world/trees.js:
+     *  a tree that comes down on a car is worn as canopy only. */
+    canopyY: trunkH,
   };
 }
 
@@ -90,6 +93,7 @@ export function createBroadleaf(theme, rng, scaleHint = 1) {
     collider: { type: 'cylinder', radius: trunkR * 3.4, height: height * 0.8, yOffset: height * 0.4, blocksSight: true },
     tag: 'broadleaf',
     height,
+    canopyY: canopyY * 0.92,
   };
 }
 
@@ -121,6 +125,8 @@ export function createDeadTree(theme, rng, scaleHint = 1) {
     collider: { type: 'cylinder', radius: trunkR * 3, height: height * 0.9, yOffset: height * 0.45, blocksSight: false },
     tag: 'dead',
     height,
+    /** A dead tree is all trunk; "the top part" is the branchy upper half. */
+    canopyY: height * 0.45,
   };
 }
 

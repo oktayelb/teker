@@ -131,11 +131,12 @@ export class Scatter {
       const m = new THREE.Matrix4().compose(_pos, _q, _scl);
 
       const jitter = 1 + rng.signed() * R.tintJitter;
-      buckets[vi].push({ matrix: m, tint: jitter });
+      const entry = { matrix: m, tint: jitter, collider: null };
+      buckets[vi].push(entry);
 
       const col = variants[vi].collider;
       if (col) {
-        this.colliders.push(
+        const collider =
           col.type === 'cylinder'
             ? {
                 type: 'cylinder',
@@ -161,8 +162,19 @@ export class Scatter {
                 ),
                 blocksSight: !!col.blocksSight,
                 kind,
-              }
-        );
+              };
+        // A collider IS the identity of one prop: damage, felling and the
+        // instance that draws it all hang off this object. `mesh`/`instance`
+        // are filled in below, once the InstancedMesh actually exists.
+        collider.baseMatrix = m;
+        collider.scale = scale;
+        /** Local Y where this variant's canopy starts — see world/trees.js. */
+        collider.canopyY = variants[vi].canopyY ?? null;
+        collider.mesh = null;
+        collider.instance = -1;
+        collider.tint = jitter;
+        entry.collider = collider;
+        this.colliders.push(collider);
       }
       placed++;
     }
@@ -180,6 +192,10 @@ export class Scatter {
         const t = list[i].tint;
         _color.setRGB(t, t, t);
         mesh.setColorAt(i, _color);
+        if (list[i].collider) {
+          list[i].collider.mesh = mesh;
+          list[i].collider.instance = i;
+        }
       }
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;

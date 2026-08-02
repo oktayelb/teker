@@ -218,6 +218,11 @@ export class Game {
     this._drivers.delete(vehicle);
     // Give the leased lights back, or the pool drains after a few respawns.
     vehicle.chassis?.dispose?.();
+    // Take the fallen tree off FIRST. It shares its geometry and material with
+    // the InstancedMesh that draws every other tree of that variant, and the
+    // traversal below disposes whatever it finds — which would take the forest
+    // with it.
+    this.world?.trees?.release(vehicle);
     this.renderer.scene.remove(vehicle.object);
     vehicle.object.traverse((o) => {
       if (o.geometry) o.geometry.dispose();

@@ -21,6 +21,7 @@ import { Track, ROAD } from './track.js';
 import { Scatter } from './scatter.js';
 import { CollisionGrid } from './collision.js';
 import { TrackLighting } from './lighting.js';
+import { Trees } from './trees.js';
 import { OPEN_WORLD } from '../config/gameplay.js';
 import { surfaceById } from '../config/tuning.js';
 import { clamp01, lerp, smoothstep } from '../core/mathx.js';
@@ -51,6 +52,8 @@ export class World {
     this.activeTrack = null;
     this.collision = new CollisionGrid(12);
     this.scatter = null;
+    /** Trunk damage and the disguise. See trees.js. */
+    this.trees = new Trees();
     /** @type {{name:string,position:THREE.Vector3,radius:number,discovered:boolean}[]} */
     this.landmarks = [];
     /** @type {Map<string, TrackLighting>} tracks that carry a lighting rig */
@@ -293,6 +296,16 @@ export class World {
     return this.collision.resolve(position, radius, 1.4);
   }
 
+  /**
+   * A vehicle just hit something static, hard. The world decides whether that
+   * matters — for a trunk it does. Called from `Vehicle#_resolveWorldCollision`,
+   * which is already the one place that holds both the car and what it hit.
+   * @param {number} momentum kg·m/s along the impact normal
+   */
+  onImpact(vehicle, collider, momentum) {
+    return this.trees.impact(vehicle, collider, momentum);
+  }
+
   /** Is this point on any track's tarmac? Used by the escape detector. */
   onAnyTrack(x, z) {
     for (const t of this._trackList) {
@@ -361,6 +374,7 @@ export class World {
     for (const rig of this.lighting.values()) rig.dispose();
     this.lighting.clear();
     this.terrain?.dispose();
+    this.trees.dispose();
     this.scatter?.dispose();
     this.collision.clear();
     this.root.clear();

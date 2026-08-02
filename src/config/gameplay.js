@@ -86,6 +86,100 @@ export const BREAKOUT = {
 };
 
 // ---------------------------------------------------------------------------
+// TREES — trunk damage, and the disguise
+// ---------------------------------------------------------------------------
+
+/**
+ * Hit a tree hard enough and it comes down on top of you, and stays there.
+ * A car wearing a tree is a car that is not a car any more, which is the whole
+ * point: it is how you get out of sight of the recovery units.
+ *
+ * Damage is KINETIC ENERGY, in joules — ½·mass·speed², measured along the
+ * impact normal. Energy rather than momentum matters more than it sounds:
+ * because it goes with the square of speed, doubling your speed does four
+ * times the damage, and shunting a trunk at walking pace does almost nothing
+ * at all. That is the right shape for "hit it hard enough".
+ *
+ * Damage ACCUMULATES: a trunk remembers every hit it has taken, so a tree you
+ * cannot fell in one go can be worried down in three.
+ */
+export const TREES = {
+  /** Prop kinds with a trunk worth breaking. Rocks and signs are not trees. */
+  fellable: ['pine', 'broadleaf', 'dead'],
+  /**
+   * Trunk capacity per metre of collider radius, in joules.
+   *
+   * Sizing, so these numbers mean something: the player masses 1100 kg, and a
+   * big pine's collider radius is about 1.45 m, a small one's about 0.78 m.
+   * At 165000 that is ~239 kJ and ~129 kJ, which in one clean hit is:
+   *
+   *     small tree  ~55 km/h
+   *     big tree    ~75 km/h
+   *
+   * Anything slower needs a second or third go at the same trunk.
+   */
+  capacityPerRadius: 165000,
+  /**
+   * Below this it was a nudge, not a hit — about 14 km/h in the player's car.
+   *
+   * This floor is doing more work than it looks. Impacts are sampled on a
+   * 0.12s cooldown, so a car simply held at full throttle against a trunk
+   * re-collides eight times a second. Energy already punishes that far harder
+   * than momentum did (a 3 m/s shunt is 5 kJ, not 3300 kg·m/s), but the floor
+   * is what makes leaning on a tree do nothing at all.
+   */
+  minImpactEnergy: 8000,
+  /** Lean of a fully-damaged (but still standing) trunk, radians. */
+  maxLean: 0.38,
+  /** Damaged trunks darken toward this fraction of their original tint. */
+  damageTint: 0.55,
+  /**
+   * How far the worn cover reaches past the car, as a multiple of the car's
+   * half-diagonal. 1 would sit flush with the corners of the bodywork; a little
+   * over is enough to hide it. It has to clear 1 by a margin rather than sit on
+   * it, because the cover is a cone: it is only at full radius right at the
+   * skirt, and the widest part of the car sits a bumper's height above that.
+   *
+   * Width is the cheap axis. Height is what blinds the player — see wornHeight
+   * — so concealment is bought here and vision is protected there.
+   */
+  wornCover: 1.45,
+  /**
+   * Fraction of the canopy that comes with you, measured up from where the
+   * trunk ended. You wear the SKIRT of the tree, not the whole thing — the top
+   * of a pine is a spire, and a spire on the roof is a periscope pointed at
+   * nothing. The lower tiers are the wide part, which is the part that hides a
+   * car.
+   */
+  wornCanopy: 0.3,
+  /**
+   * Height of the worn cover as a multiple of the car's overall height.
+   *
+   * This is the axis that decides whether the player can still drive. Taller
+   * would conceal better — a cone is wider at bumper height the taller it is —
+   * but it buys that by filling the screen, so concealment is bought on
+   * `wornCover` instead and this stays low. A little bodywork showing under
+   * the skirt is the accepted cost, and honestly reads better than a perfectly
+   * swallowed car.
+   */
+  wornHeight: 1.5,
+  /**
+   * A tree lying over the car only hides it while the car is not obviously a
+   * car — i.e. while it is barely moving. A pine doing 90 km/h through the
+   * forest is not camouflage, it is a parade.
+   */
+  disguiseSpeed: 4.0,
+  /**
+   * Wearing a felled tree only becomes possible once there is something to hide
+   * from — `chase:started`. Before that, trees still come down when you hit
+   * them hard enough; they just do not end up on the roof. Handing the player a
+   * disguise during the races would explain a mechanic before the story has
+   * given them any reason to want it.
+   */
+  armedBy: 'chase:started',
+};
+
+// ---------------------------------------------------------------------------
 // OPEN WORLD
 // ---------------------------------------------------------------------------
 
