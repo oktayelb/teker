@@ -156,6 +156,10 @@ export class RaceMode extends Mode {
     // does, so they get to name the button.
     this.nextLabel = params.nextLabel ?? (this.autoAdvance ? 'SONRAKİ YARIŞ' : 'DEVAM');
 
+    // A track knows what time of day it is. Parkur 3 is lit by a rig, not by
+    // the sun, so it carries `theme: 'night'` — see its header.
+    if (this.track.data?.theme) g.setTheme(this.track.data.theme, params.themeFade ?? 0);
+
     g.clearVehicles();
     g.useModeRig('race', true);
     g.ui.hud.setMode('race');
@@ -198,6 +202,13 @@ export class RaceMode extends Mode {
       this.progress.push(new Progress(v, this.track, this.track.checkpoints.length));
     }
 
+    // Hold the grid. Zeroing the driver commands is not enough: gravity still
+    // integrates, and parkur 3 starts on a ridge, so the field creeps downhill
+    // through the countdown and half of it is over the line before GO. `reset()`
+    // has already seated every car exactly on the ground, so freezing here is
+    // simply "stay where you were put".
+    this._setGridHold(true);
+
     g.audio.setAmbience('forest');
     g.audio.setMusic('race');
     g.audio.startEngine();
@@ -230,9 +241,19 @@ export class RaceMode extends Mode {
     this._go();
   }
 
+  /**
+   * Freeze/release every car on the grid. `disabled` is already honoured by
+   * both `Vehicle#fixedUpdate` and `resolveVehicleContacts`, so a held car is
+   * skipped by the physics entirely rather than fighting it.
+   */
+  _setGridHold(held) {
+    for (const v of this.ctx.vehicles) v.disabled = held;
+  }
+
   _go() {
     // A mode torn down mid-countdown must not start a race behind the next one.
     if (!this.active) return;
+    this._setGridHold(false);
     this.state = 'racing';
     this.time = 0;
     for (const p of this.progress) p.lapStart = 0;
@@ -240,6 +261,9 @@ export class RaceMode extends Mode {
   }
 
   async exit() {
+    // Never hand a frozen car to the next mode — the breakout keeps the player
+    // across the switch, and a mode torn down mid-countdown would strand it.
+    this._setGridHold(false);
     for (const id of this._timers) clearTimeout(id);
     this._timers.length = 0;
     this.subs.dispose();

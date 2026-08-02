@@ -234,6 +234,15 @@ export class UI {
     return this;
   }
 
+  /**
+   * Freeze counted screen time — the countdown, alert durations, the
+   * typewriter — while the game is paused. Animation is unaffected.
+   */
+  setPaused(paused) {
+    this._screens.setPaused(paused);
+    return this;
+  }
+
   /** Per-frame. `dt` in seconds. */
   update(dt) {
     this._lastExternal = nowMs();

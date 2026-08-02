@@ -328,8 +328,13 @@ export class IntroDirector {
     g.loop.effectTimeScale = 1;
     g.input.setLocked(false);
     await this._rampGlitch(1.0, 0, T.glitchRelease);
-    g.setTheme('outside', 3.5);
-    g.audio.setAmbience('outside');
+    // Stay in the dark. Parkur 3 runs at night (see track3.js), so brightening
+    // to overcast daylight here would undo the point of the whole sequence —
+    // the headlights switched on above are the only light the player owns, and
+    // the sun coming up the moment they escape hands that back for free. Dawn
+    // is earned later, after the chase: see `_onChaseEscaped`.
+    g.setTheme('night', 3.5);
+    g.audio.setAmbience('night');
     g.audio.setMusic('none');
 
     this._setPhase('free');

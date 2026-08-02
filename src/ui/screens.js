@@ -80,6 +80,8 @@ export class Screens {
     this._typer = null;
     this._theme = null;
     this._reduced = false;
+    /** While true, `update()` advances nothing. See setPaused. */
+    this._paused = false;
   }
 
   mount() {
@@ -588,8 +590,22 @@ export class Screens {
     if (ui.accent != null) this.el.style.setProperty('--accent', hexToCss(ui.accent));
   }
 
+  /**
+   * Freeze the screens' own clock.
+   *
+   * CSS keeps animating regardless — what stops here is everything that
+   * *counts*: the countdown, alert durations, the typewriter. A 3·2·1 that
+   * keeps running behind the pause menu hands the player a race that started
+   * without them.
+   */
+  setPaused(paused) {
+    this._paused = !!paused;
+    return this;
+  }
+
   /** Per-frame. Runs the typewriter and every pending timer. */
   update(dt) {
+    if (this._paused) return;
     const d = Number(dt) || 0;
 
     if (this._typer) {

@@ -40,6 +40,17 @@ export default {
   checkpoints: 14,
   startProgress: 0.0,
 
+  /**
+   * This stage runs at night, and that is not decoration.
+   *
+   * Everything about parkur 3 assumes the sun is down: the floodlight rig is
+   * the only reason the road is readable, the `gaps` in that rig are the trap,
+   * and the blackout at 0.44 is the whole story beat. Under a daytime sky the
+   * rig is invisible, the gaps mean nothing, the headlights mean nothing, and
+   * the lights going out costs the player exactly zero.
+   */
+  theme: 'night',
+
   /** Packed dirt for the whole stage — this was never paved. */
   defaultSurface: 'DIRT',
   /** No paint of any kind. The posts do the guiding. */

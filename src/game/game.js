@@ -267,6 +267,9 @@ export class Game {
     this.modes.update(dt);
     this.camera.update(dt, inputState);
     // The UI runs on real time so it keeps animating through pause and slow-mo.
+    // Its *counters* must not: a countdown is race logic that happens to live
+    // in the UI, and on real time it kept ticking behind the pause menu.
+    this.ui.setPaused(this.loop.paused);
     this.ui.update(this.loop.rawDt ?? dt);
     this._updateAudio(dt);
     this.input.endFrame();
