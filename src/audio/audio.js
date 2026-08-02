@@ -694,9 +694,21 @@ export class AudioEngine {
    * wherever is convenient (boot, first mode, a settings screen). If WebAudio
    * is unavailable this quietly marks the engine as failed and every other
    * method becomes a no-op.
+   *
+   * This is also the way *back* from `dispose()`. A disposed engine is torn
+   * down, not dead. That distinction matters because `audio` is a module
+   * singleton shared by every Game in the page: when the latch was permanent,
+   * one teardown silenced the rest of the session with no way to recover, and
+   * the symptom — sound that goes and never comes back — looks exactly like a
+   * browser autoplay problem, which sends you hunting in the wrong place.
+   *
+   * Note `_failed` is NOT cleared here: WebAudio being unavailable is a fact
+   * about the browser, not a state we tore down.
    */
   init() {
-    if (this._ctx || this._failed || this._disposed) return this;
+    if (this._ctx || this._failed) return this;
+    // Whatever dispose() released, we are building it again.
+    this._disposed = false;
 
     const Ctor = pickAudioContextCtor();
     if (!Ctor) {
@@ -782,7 +794,8 @@ export class AudioEngine {
    * Always returns a Promise and never rejects — a game should not care.
    */
   unlock() {
-    if (this._disposed) return Promise.resolve(false);
+    // No `_disposed` guard: init() below is what lifts it. A gesture arriving
+    // after a teardown should bring the sound back, not be refused.
     if (!this._ctx && !this._failed) this.init();
     const ctx = this._ctx;
     if (!ctx) return Promise.resolve(false);
@@ -815,7 +828,11 @@ export class AudioEngine {
     }
   }
 
-  /** Tear everything down. The instance is dead afterwards. */
+  /**
+   * Release the context and every node hanging off it. Reversible: `init()`
+   * builds a fresh graph and `unlock()` calls `init()` for you, so a later
+   * Game — or a later gesture — gets working sound back.
+   */
   dispose() {
     if (this._disposed) return;
     this._disposed = true;

@@ -14,7 +14,6 @@
  */
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
 
 const PORT = 8239;
 const BASE = `http://localhost:${PORT}/index.html`;
@@ -108,8 +107,6 @@ try {
   s = await probe(page);
   check('results panel opens', s.open.includes('dim'), `btn=${s.results}`);
   check('results panel says how to continue', s.hint === 'ENTER', String(s.hint));
-  mkdirSync('tools/out', { recursive: true });
-  await page.screenshot({ path: 'tools/out/race-results.png' });
 
   // THE POINT: sit here doing nothing for a long time. Nothing may advance.
   await sleep(9000);
@@ -136,7 +133,6 @@ try {
   );
   s = await probe(page);
   check('screen is visible before the countdown ends', s.state !== 'racing', `state=${s.state} fade=${s.fade}`);
-  await page.screenshot({ path: 'tools/out/race2-grid.png' });
 
   await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 20000 });
   console.log('  race 2 running.');
@@ -174,7 +170,6 @@ async function page3Checks(p3) {
   }));
   check('director counts this as the third race', d.races === 2, `racesCompleted=${d.races}`);
   check('parkur 3 has no results screen — the story ends it', d.showResults === false, String(d.showResults));
-  await p3.screenshot({ path: 'tools/out/race3-start.png' });
 
   // The whole point of the shortcut: the director must still be attached, so
   // driving off the edge still breaks the game open instead of doing nothing.
@@ -188,7 +183,6 @@ async function page3Checks(p3) {
   await p3.waitForFunction("window.__log.join().includes('intro:phase:free')", { timeout: 30000 })
     .then(() => check('…and hands over to the open world', true))
     .catch(() => check('…and hands over to the open world', false, 'timed out'));
-  await p3.screenshot({ path: 'tools/out/race3-breakout.png' });
   console.log('  events:', (await probe(p3)).log);
 }
 

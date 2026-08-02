@@ -88,14 +88,37 @@ export class Game {
     this.input.attach();
 
     // Audio must wait for a gesture; arm it on the first one we see.
+    //
+    // CAPTURE PHASE, and it matters. Modal screens also listen on `window`, in
+    // the capture phase, and call stopPropagation() on the keys they own (see
+    // ui/screens.js `_onKey`). `window` is both the first node of the capture
+    // path and the last of the bubble path, so stopping there means a
+    // bubble-phase listener never runs at all — and the very first gesture a
+    // player makes is ENTER on the title menu, which the menu owns. Registered
+    // on the bubble it was swallowed, the context stayed suspended, and the
+    // game was silent until the player happened to press a key no modal wanted.
     this.audio.init();
     const unlock = () => {
-      this.audio.unlock();
-      globalThis.removeEventListener('pointerdown', unlock);
-      globalThis.removeEventListener('keydown', unlock);
+      // Retire the listeners only once the context is GENUINELY running.
+      //
+      // `unlock()` resolves to whether it worked: resume() can reject, or
+      // resolve with the context still suspended, whenever the browser decides
+      // a gesture doesn't count — and the first gesture after a navigation is
+      // exactly the one it's most likely to refuse. ANA MENÜ navigates the page
+      // (see togglePause), so unhooking on the first *attempt* rather than the
+      // first *success* left the game silent for the rest of the session with
+      // nothing left listening to try again.
+      //
+      // Now every gesture retries until sound actually happens, and only then
+      // does this stop costing anything.
+      Promise.resolve(this.audio.unlock()).then((running) => {
+        if (!running) return;
+        globalThis.removeEventListener('pointerdown', unlock, true);
+        globalThis.removeEventListener('keydown', unlock, true);
+      });
     };
-    globalThis.addEventListener('pointerdown', unlock);
-    globalThis.addEventListener('keydown', unlock);
+    globalThis.addEventListener('pointerdown', unlock, true);
+    globalThis.addEventListener('keydown', unlock, true);
     if (this.boot.muted) this.audio.setMuted(true);
 
     this.world = new World({

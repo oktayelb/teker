@@ -15,7 +15,6 @@
  */
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
 
 const PORT = 8241;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -132,9 +131,7 @@ try {
   // is measured against. On real hardware this lands near escapeHoldSeconds.
   check('…without dragging', delay != null && delay < 6, `${delay?.toFixed(2)}s`);
 
-  mkdirSync('tools/out', { recursive: true });
   await sleep(2500);
-  await page.screenshot({ path: 'tools/out/breakout-fired.png' });
 } finally {
   await browser.close();
   server.kill();
