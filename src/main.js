@@ -71,6 +71,10 @@ async function boot() {
     game.setTheme(options.theme || 'outside', 0);
     game.audio.setAmbience('outside');
     await game.modes.switchTo('openWorld', { rig: 'chaseWide' });
+    // Say so. Systems that wait for the story to be over — the wildlife, which
+    // only comes out once nothing is chasing you — would otherwise wait forever
+    // on a boot that never had a story to finish.
+    events.emit('intro:finished', { skipped: true });
     return;
   }
 

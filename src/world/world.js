@@ -22,6 +22,7 @@ import { Scatter } from './scatter.js';
 import { CollisionGrid } from './collision.js';
 import { TrackLighting } from './lighting.js';
 import { Trees } from './trees.js';
+import { Wildlife } from './wildlife.js';
 import { OPEN_WORLD } from '../config/gameplay.js';
 import { surfaceById } from '../config/tuning.js';
 import { clamp01, lerp, smoothstep } from '../core/mathx.js';
@@ -52,6 +53,8 @@ export class World {
     this.activeTrack = null;
     this.collision = new CollisionGrid(12);
     this.scatter = null;
+    /** Animals, pooled around the camera. See wildlife.js. */
+    this.wildlife = null;
     /** Trunk damage and the disguise. See trees.js. */
     this.trees = new Trees();
     /** @type {{name:string,position:THREE.Vector3,radius:number,discovered:boolean}[]} */
@@ -129,6 +132,15 @@ export class World {
 
     if (scatter) {
       await step('forest', 0.72, () => this._scatterForest());
+      await step('wildlife', 0.9, () => {
+        this.wildlife = new Wildlife({
+          terrain: this.terrain,
+          materials: this.materials,
+          theme: this.theme,
+          seed: this.seed ^ 0xa11e,
+        }).build();
+        this.root.add(this.wildlife.root);
+      });
     }
 
     await step('landmarks', 0.94, () => this._placeLandmarks());
@@ -170,6 +182,10 @@ export class World {
     s.place({ kind: 'log', count: Math.round(D.rocks * 0.35), region: { radius: span * 0.9 }, avoid: avoidTracks });
     // Blank signs only exist away from the tracks. Nobody was meant to read them.
     s.place({ kind: 'sign', count: 90, region: { inner: span * 0.25, radius: span * 0.9 }, avoid: avoidTracks });
+    // Signs somebody left, and cars somebody left. Kept off the inner ring so
+    // the first thing past the tracks is still forest.
+    s.place({ kind: 'poster', count: D.posters, region: { inner: span * 0.12, radius: span * 0.92 }, avoid: avoidTracks });
+    s.place({ kind: 'wreck', count: D.wrecks, region: { inner: span * 0.15, radius: span * 0.9 }, avoid: avoidTracks });
 
     this.root.add(s.root);
     this.collision.insertAll(s.colliders);
@@ -358,6 +374,7 @@ export class World {
   }
 
   update(dt, time, cameraPosition = null) {
+    this.wildlife?.update(dt, cameraPosition);
     // The mast lamp blinks on its own schedule, forever, for no one.
     if (this._mastLamp) {
       this._mastLamp.visible = Math.sin(time * 1.6) > 0.3;
@@ -374,6 +391,7 @@ export class World {
     for (const rig of this.lighting.values()) rig.dispose();
     this.lighting.clear();
     this.terrain?.dispose();
+    this.wildlife?.dispose();
     this.trees.dispose();
     this.scatter?.dispose();
     this.collision.clear();

@@ -44,6 +44,10 @@ export const SCATTER_RULES = {
   grass: { variants: 4, scale: [0.7, 1.6], maxSlope: 0.45, surfaces: ['GRASS'], clumping: 0.35, clumpScale: 0.006, tintJitter: 0.18, lean: 0.1 },
   log: { variants: 3, scale: [0.8, 1.2], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.2, clumpScale: 0.006, tintJitter: 0.08, lean: 0.06 },
   sign: { variants: 2, scale: [0.9, 1.1], maxSlope: 0.25, surfaces: ['GRASS', 'DIRT'], clumping: 0.0, clumpScale: 0.01, tintJitter: 0.03, lean: 0.02 },
+  // Somebody walked out here to put these up, so they cluster near where a
+  // person could get to rather than scattering evenly through the trees.
+  poster: { variants: 4, scale: [0.9, 1.15], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.55, clumpScale: 0.0016, tintJitter: 0.06, lean: 0.05 },
+  wreck: { variants: 5, scale: [0.92, 1.08], maxSlope: 0.22, surfaces: ['GRASS', 'DIRT'], clumping: 0.35, clumpScale: 0.0012, tintJitter: 0.07, lean: 0.03 },
 };
 
 export class Scatter {
@@ -219,9 +223,11 @@ export class Scatter {
 }
 
 function defaultMaterialFor(kind) {
-  if (kind === 'rock') return 'prop';
-  if (kind === 'sign' || kind === 'post') return 'barrier';
+  if (kind === 'rock' || kind === 'wreck') return 'prop';
+  if (kind === 'sign' || kind === 'post' || kind === 'poster') return 'barrier';
   if (kind === 'log') return 'trunk';
+  // `foliage` is double-sided, which the single-triangle leaves and wings need
+  // and solid props do not.
   return 'foliage';
 }
 

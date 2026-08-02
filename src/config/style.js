@@ -138,6 +138,26 @@ export const THEMES = {
       sign: 0xd9c98a,
       post: 0x7a6a52,
       water: 0x3f6a7a,
+      /** Paper on a stake. Bleached by however long it has been out there. */
+      paper: 0xe8e2d0,
+      paperInk: 0x2e2c28,
+      /** Bodywork that has been sitting in a forest for years. */
+      rust: 0x8a4a2c,
+      rustDark: 0x5c3320,
+    },
+    /**
+     * Fur and wings. Every theme inherits these from `forest`, so the open
+     * world is populated in all of them without four copies of the palette.
+     */
+    animals: {
+      cat: 0x4a4038,
+      catAlt: 0xc8a878,
+      fox: 0xc4622a,
+      foxTail: 0xe8ddd0,
+      bird: 0x2e3138,
+      birdAlt: 0x6a7078,
+      butterfly: 0xf0c850,
+      butterflyAlt: 0xd8683a,
     },
     vehicles: {
       player: 0xd8483a,

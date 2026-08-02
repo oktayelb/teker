@@ -180,6 +180,76 @@ export const TREES = {
 };
 
 // ---------------------------------------------------------------------------
+// WILDLIFE — the open world with things living in it
+// ---------------------------------------------------------------------------
+
+/**
+ * Animals are a POOL, not scenery.
+ *
+ * Scattering cats across a 1400m disc the way trees are scattered would put
+ * roughly none of them where the player is ever looking. Instead a fixed
+ * population lives in a ring that follows the camera: anything that falls too
+ * far behind is recycled to somewhere ahead. The counts below are therefore how
+ * many are near you at any moment, not how many exist in the world — which is
+ * why they are small numbers. Seeing a fox should be an event.
+ *
+ * None of them has a collider. You drive through a butterfly.
+ */
+export const WILDLIFE = {
+  /**
+   * Nothing living appears until the cops are off you.
+   *
+   * The forest holds its breath for the whole chase and only comes back once
+   * you are alone in it — which makes the wildlife the reward for getting away
+   * rather than set dressing you drove past during the race.
+   *
+   * `intro:finished` is the second entry for the no-story paths (`?skip=intro`,
+   * the free-roam menu option), where no chase ever happens and the world would
+   * otherwise stay empty forever.
+   */
+  armedBy: ['chase:escaped', 'intro:finished'],
+  /**
+   * Default distance animals live within, metres. Each kind overrides it,
+   * because "near enough to see" is not one number: a butterfly is 15cm across
+   * and invisible past about forty metres, so spreading butterflies over the
+   * same ring as birds spends the whole population where nobody can see it.
+   * Small things live close and crowded; birds get the whole sky.
+   */
+  radius: 140,
+  /** Recycled once they fall this far past the radius — hysteresis, so a car
+   *  hovering at the boundary does not thrash the pool. */
+  margin: 60,
+  /** Recycled animals reappear no closer than this, so nothing pops in view. */
+  minSpawn: 90,
+  kinds: {
+    butterfly: {
+      count: 15,
+      variants: 3,
+      radius: 46,
+      /** Metres above the ground it hovers. */
+      hover: [0.4, 2.2],
+      speed: [0.7, 1.6],
+      /** How often it changes its mind, seconds. */
+      turn: [0.3, 1.1],
+      /** Radians per second of body wobble — this is the flutter. */
+      wobble: 9,
+    },
+    bird: {
+      count: 6,
+      variants: 3,
+      radius: 260,
+      hover: [16, 34],
+      speed: [7, 12],
+      /** Birds orbit rather than wander: metres. */
+      orbit: [22, 55],
+      bank: 0.5,
+    },
+    cat: { count: 5, variants: 3, radius: 80, hover: [0, 0], speed: [0.8, 1.5], turn: [2.5, 7], idle: [3, 9] },
+    fox: { count: 3, variants: 3, radius: 130, hover: [0, 0], speed: [2.2, 4.0], turn: [1.8, 5], idle: [1, 4] },
+  },
+};
+
+// ---------------------------------------------------------------------------
 // OPEN WORLD
 // ---------------------------------------------------------------------------
 
@@ -191,7 +261,15 @@ export const OPEN_WORLD = {
   /** Metres between terrain samples. resolution * cellSize = world span. */
   terrainCellSize: 13,
   /** Trees, rocks and grass tufts across the whole world. */
-  scatterDensity: { trees: 4200, rocks: 900, bushes: 2400, grass: 5200 },
+  scatterDensity: {
+    trees: 4200,
+    rocks: 900,
+    bushes: 2400,
+    grass: 5200,
+    /** Somebody was out here. Sparse on purpose — finding one should register. */
+    posters: 140,
+    wrecks: 70,
+  },
   /** Draw distance for scattered props, metres. Fog hides the pop-in. */
   scatterDrawDistance: 340,
   /** Seed for world generation — same seed, same world, every time. */
