@@ -127,6 +127,9 @@ export class Screens {
     const btnWrap = el('div', 'tk-menu');
     btnWrap.append(this._resultsBtn);
     card.append(btnWrap);
+    // The screen waits indefinitely, so it has to say what it is waiting for.
+    this._resultsHint = el('div', 'tk-results-hint tk-txt', 'ENTER');
+    card.append(this._resultsHint);
     this._results.append(card);
 
     // -- pause --------------------------------------------------------------

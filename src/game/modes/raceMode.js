@@ -34,10 +34,12 @@ class Progress {
     this.lapTimes = [];
     this.bestLap = Infinity;
     this.place = 1;
-    // Off-course tracking.
+    // Off-course tracking. Three clocks, deliberately: running wide, being off
+    // the course, and being somewhere the course has plainly let go of you.
     this.offTrackTime = 0;
     this.offCourseTime = 0;
     this.offCourseDistance = 0;
+    this.outOfBoundsTime = 0;
     this.wrongWayTime = 0;
   }
 
@@ -50,6 +52,7 @@ class Progress {
       // Outside the track's spatial hash entirely — as far off as it gets.
       this.offCourseTime += dt;
       this.offCourseDistance = Infinity;
+      this.outOfBoundsTime += dt;
       this.offTrackTime += dt;
       return null;
     }
@@ -94,6 +97,12 @@ class Progress {
       this.offCourseDistance = 0;
     }
 
+    // Out of bounds is its own clock, and it resets the moment the car is back
+    // inside. Clipping the verge for twenty seconds must not count as twenty
+    // seconds of having left.
+    if (edge > RACE.outOfBoundsDistance) this.outOfBoundsTime += dt;
+    else this.outOfBoundsTime = 0;
+
     // -- wrong way ----------------------------------------------------------
     const dot = v.forward.x * q.forwardX + v.forward.z * q.forwardZ;
     if (dot < -0.25 && v.speed > 4) this.wrongWayTime += dt;
@@ -118,6 +127,7 @@ export class RaceMode extends Mode {
     this.subs = new Subscriptions();
     this._query = {};
     this._results = null;
+    this._timers = [];
     /** When false, finishing does not show a results screen — the director
      *  wants to handle the ending itself. */
     this.showResults = true;
@@ -130,7 +140,10 @@ export class RaceMode extends Mode {
    * @param {number} [params.laps]
    * @param {number} [params.rivals]
    * @param {boolean} [params.showResults]
-   * @param {boolean} [params.countdown]
+   * @param {string} [params.nextLabel] confirm-button text on the results panel
+   * @param {boolean|'deferred'} [params.countdown] `true` counts down inside
+   *   `enter()`; `false` starts racing at once; `'deferred'` holds the grid
+   *   until the caller calls {@link startCountdown} — see the note there.
    */
   async enter(params = {}) {
     const g = this.ctx;
@@ -139,6 +152,9 @@ export class RaceMode extends Mode {
     this.laps = params.laps ?? this.track.laps ?? RACE.laps;
     this.showResults = params.showResults !== false;
     this.autoAdvance = params.autoAdvance ?? null;
+    // Race mode has no idea whether anything comes next — whoever sequenced it
+    // does, so they get to name the button.
+    this.nextLabel = params.nextLabel ?? (this.autoAdvance ? 'SONRAKİ YARIŞ' : 'DEVAM');
 
     g.clearVehicles();
     g.useModeRig('race', true);
@@ -188,8 +204,24 @@ export class RaceMode extends Mode {
 
     events.emit('race:ready', { trackId: this.track.id, name: this.track.name, laps: this.laps });
 
+    // 'deferred' leaves the cars parked on the grid. `enter()` resolves as soon
+    // as the scene is built, and the caller decides when the lights go out.
+    if (params.countdown === 'deferred') return;
     if (params.countdown !== false) await this._countdown();
     else this._go();
+  }
+
+  /**
+   * Run the lights and release the cars.
+   *
+   * Only needed after `enter({ countdown: 'deferred' })`. A caller that fades to
+   * black over the track swap must be able to fade back IN before the countdown
+   * starts — otherwise 3·2·1·GO plays behind the curtain and the race is already
+   * running by the time the player can see it.
+   */
+  async startCountdown() {
+    if (this.state !== 'grid') return;
+    await this._countdown();
   }
 
   async _countdown() {
@@ -199,6 +231,8 @@ export class RaceMode extends Mode {
   }
 
   _go() {
+    // A mode torn down mid-countdown must not start a race behind the next one.
+    if (!this.active) return;
     this.state = 'racing';
     this.time = 0;
     for (const p of this.progress) p.lapStart = 0;
@@ -206,6 +240,8 @@ export class RaceMode extends Mode {
   }
 
   async exit() {
+    for (const id of this._timers) clearTimeout(id);
+    this._timers.length = 0;
     this.subs.dispose();
     this.ctx.world.setActiveTrack(null);
     this.ctx.ui.hud.setWarning(null);
@@ -229,7 +265,10 @@ export class RaceMode extends Mode {
           id: p.vehicle.id,
           isPlayer: p.vehicle === this.ctx.player,
           distance: p.offCourseDistance,
+          /** How long off the racing line at all. */
           duration: p.offCourseTime,
+          /** How long genuinely out of bounds — see RACE.outOfBoundsDistance. */
+          outOfBoundsTime: p.outOfBoundsTime,
           lap: p.lap,
           trackId: this.track.id,
         });
@@ -264,11 +303,31 @@ export class RaceMode extends Mode {
       totalTime: playerProgress.finishTime,
       bestLap: playerProgress.bestLap === Infinity ? null : playerProgress.bestLap,
     };
+    // Two separate signals, and the difference matters:
+    //   race:finished  — the moment the line is crossed. Stats, audio, records.
+    //   race:dismissed — the player has SEEN the result and asked to move on.
+    // A caller that sequences races must wait for the second one. Waiting for
+    // the first tears the mode down while the results panel is still on screen,
+    // which reads as the game skipping straight to the next race.
     events.emit('race:finished', this._results);
 
-    if (!this.showResults) return;
-    await g.ui.screens.showRaceResults({ ...this._results, next: this.autoAdvance ? 'NEXT RACE' : 'CONTINUE' });
+    if (this.showResults) {
+      // Let the finish breathe: the car rolls on, the camera stays with it.
+      await this._sleep(RACE.resultsDelay);
+      if (!this.active) return;
+      await g.ui.screens.showRaceResults({ ...this._results, next: this.nextLabel });
+    }
+
+    events.emit('race:dismissed', this._results);
     if (this.autoAdvance) g.modes.switchTo(this.autoAdvance.mode, this.autoAdvance.params);
+  }
+
+  /** Cancellable wait — a mode exit must not leave a timer running into it. */
+  _sleep(seconds) {
+    return new Promise((resolve) => {
+      const id = setTimeout(resolve, seconds * 1000);
+      this._timers.push(id);
+    });
   }
 
   _updateStandings() {

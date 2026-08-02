@@ -131,8 +131,22 @@ export const BEATS = {
 export const INTRO_TIMING = {
   /** Held on the title before the first race can be started. */
   titleMinimum: 1.2,
-  /** Gap between a race ending and the next one beginning. */
-  betweenRaces: 1.0,
+  /**
+   * Gap between the player dismissing a result and the next grid appearing.
+   * This is on top of the results screen itself, which waits for ENTER — the
+   * pacing between races is a held beat, not a cut. Long enough for the closing
+   * line of the race that just ended to finish speaking.
+   */
+  betweenRaces: 3.0,
+  /** Fade to black over the swap, and back in on the new grid. */
+  raceFadeOut: 0.8,
+  raceFadeIn: 1.0,
+  /**
+   * Sat on the new grid, engine running, before the countdown starts. This is
+   * where the parkour's name lands — the player should have a moment to look at
+   * where they are rather than being counted straight into a corner.
+   */
+  gridHold: 1.6,
   /** Slow-motion factor applied at the moment of the break, and for how long. */
   breakSlowMo: 0.35,
   breakSlowMoSeconds: 1.8,

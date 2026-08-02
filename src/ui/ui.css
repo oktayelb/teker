@@ -765,6 +765,26 @@ body {
 
 .tk-row .tk-label { align-self: center; }
 
+/* The results screen holds until the player presses on — say so. */
+.tk-results-hint {
+  margin-top: calc(var(--pad) * 0.55);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-align: center;
+  color: var(--ink-dim);
+  animation: tk-hint-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tk-hint-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tk-results-hint { animation: none; opacity: 0.6; }
+}
+
 /* -- alert ----------------------------------------------------------------- */
 
 .tk-alert {

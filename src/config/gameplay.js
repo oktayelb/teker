@@ -12,6 +12,12 @@
 export const RACE = {
   laps: 2,
   countdownSeconds: 3,
+  /**
+   * Seconds between crossing the line and the results panel appearing. The car
+   * keeps rolling and the camera stays on it — a race that cuts to a menu the
+   * instant you finish never lets the finish land.
+   */
+  resultsDelay: 2.8,
   /** Grid spacing, metres. */
   gridRowGap: 7.0,
   gridColumnGap: 4.2,
@@ -25,6 +31,16 @@ export const RACE = {
   poleGap: 14.0,
   /** How far off the racing line before "OFF TRACK" shows, in ribbon half-widths. */
   offTrackFactor: 1.15,
+  /**
+   * Metres past the ribbon edge before a car counts as *out of bounds* rather
+   * than merely running wide.
+   *
+   * These are two different questions and they need two different clocks.
+   * `offCourseTime` starts at the first centimetre past the edge, which on a
+   * dirt parkur is most of the lap — it is the right clock for a warning light
+   * and the wrong one for anything that cares whether a car has actually left.
+   */
+  outOfBoundsDistance: 20,
   /** Seconds off-track before the game respawns you (0 disables). */
   respawnAfterOffTrack: 0,
   /** Checkpoint radius in metres — generous, they are a safety net not a test. */
@@ -52,8 +68,17 @@ export const BREAKOUT = {
   armedOnLap: 1,
   /** Distance beyond the ribbon edge (metres) that counts as "gone". */
   escapeDistance: 55,
-  /** …sustained for this long, so a brief excursion is not enough. */
+  /**
+   * …and held for this long *while out of bounds*, so a brief excursion is not
+   * enough. Timed against `outOfBoundsTime`, never against `offCourseTime`:
+   * see RACE.outOfBoundsDistance for why the distinction matters.
+   */
   escapeHoldSeconds: 1.6,
+  /**
+   * The slower path in: not far enough out to be unambiguous, but out of bounds
+   * for long enough that the player has plainly stopped racing.
+   */
+  strandedSeconds: 6.0,
   /** Seconds before the game *would* normally reset you — never fires here. */
   normalResetDelay: 3.0,
   /** How long the "reset failed" glitch plays before control returns. */
@@ -181,6 +206,13 @@ export function readBootOptions(search = globalThis.location?.search || '') {
   const skip = q.get('skip');
   return {
     scene: q.get('scene') || DEBUG.startScene,
+    /**
+     * Skip the title menu and start the story at a given point.
+     * `?start=race3` is the one you want when testing the stage that breaks:
+     * unlike `?scene=race3` it runs the *director*, so the blackout, the
+     * breakout, the sirens and the chase all still happen.
+     */
+    start: q.get('start') || null,
     skipIntro: skip === 'intro' || skip === '1' || skip === 'true' || DEBUG.skipIntro,
     theme: q.get('theme') || null,
     renderPreset: q.get('render') || null,

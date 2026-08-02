@@ -6,7 +6,8 @@
  * game. Delete `src/game/intro/` and the `import` here, and the rest still runs.
  *
  *   ?skip=intro          straight to free roam
- *   ?scene=race1|race2|race3|open|chase
+ *   ?start=race3         story, but starting at the parkour that breaks
+ *   ?scene=race1|race2|race3|open|chase   one situation, no director
  *   ?cam=chase|hood|bumper|chaseWide|cinematic|free
  *   ?theme=forest|outside|night|glitch
  *   ?render=psx|n64|clean
@@ -75,6 +76,9 @@ async function boot() {
 
   // --- the opening ---------------------------------------------------------
   const director = new IntroDirector(game);
+  // `?start=race3` skips the title and the two warm-up races, but keeps the
+  // director attached — so everything after the third race still plays.
+  if (options.start) director.startAt = options.start;
   const prevUpdate = game.loop.onUpdate;
   game.loop.onUpdate = (dt, loop) => {
     prevUpdate(dt, loop);

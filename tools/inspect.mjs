@@ -24,6 +24,9 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
+  // Never let Chromium serve a cached module — a stale bundle produces
+  // "impossible" diagnostics that cost far more than the re-fetch.
+  await page.setCacheEnabled(false);
 
   page.on('console', (m) => console.log(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', (e) => console.log(`[PAGEERROR] ${e.message}\n${e.stack ?? ''}`));

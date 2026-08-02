@@ -51,6 +51,8 @@ export class IntroDirector {
     this._chase = null;
     this._everHidden = false;
     this._trackFoundAt = -Infinity;
+    /** Set to a title-menu id to skip the menu entirely (see `?start=`). */
+    this.startAt = null;
   }
 
   // -- lifecycle ------------------------------------------------------------
@@ -64,7 +66,9 @@ export class IntroDirector {
     g.modes.register('openWorld', OpenWorldMode);
 
     this.subs
-      .on('race:finished', (p) => this._onRaceFinished(p))
+      // Crossing the line scores it; pressing on is what moves the story.
+      .on('race:finished', () => this.game.flags.racesCompleted++)
+      .on('race:dismissed', (p) => this._onRaceDismissed(p))
       .on('race:offCourse', (p) => this._onOffCourse(p))
       .on('chase:escaped', () => this._onChaseEscaped())
       .on('chase:lost', () => this._onChaseLost())
@@ -124,44 +128,87 @@ export class IntroDirector {
     showcase.reset(slot.position, slot.heading);
     g.camera.setTarget(showcase);
 
-    this._play('title.tagline');
     // Pass the menu explicitly rather than relying on the UI's defaults — the
     // ids below are the director's contract with the title screen.
-    const action = await g.ui.screens.showTitle({
-      tagline: 'Üç parkur · Orman devresi',
-      items: [
-        { id: 'start', label: 'BAŞLA' },
-        { id: 'freeRoam', label: 'SERBEST SÜRÜŞ' },
-      ],
-    });
+    let action = this.startAt;
+    if (!action) {
+      this._play('title.tagline');
+      action = await g.ui.screens.showTitle({
+        tagline: 'Üç parkur · Orman devresi',
+        items: [
+          { id: 'start', label: 'BAŞLA' },
+          { id: 'race3', label: 'PARKUR 3’TEN BAŞLA' },
+          { id: 'freeRoam', label: 'SERBEST SÜRÜŞ' },
+        ],
+      });
+    }
+
     if (action === 'skip' || action === 'freeRoam') {
       // The player asked to skip the story. Honour it completely.
       await this._handOver({ skipped: true });
       return;
     }
 
-    await this._runRace('track1', 'race1', 'race1.pre', 'race1.post');
-    await this._runRace('track2', 'race2', 'race2.pre', 'race2.post');
+    // Straight to the stage that breaks — the one worth testing repeatedly.
+    // Everything downstream (blackout, breakout, sirens, chase) is unchanged;
+    // only the two warm-up races are skipped.
+    if (action === 'race3') {
+      g.flags.racesCompleted = 2;
+      await this._runRace('track3', 'race3', 'race3.pre', null);
+      return;
+    }
+
+    // Race 1 alone does not fade: the title screen is already parked on this
+    // grid, so cutting to it reads as the camera settling, not as a load.
+    await this._runRace('track1', 'race1', 'race1.pre', 'race1.post', {
+      fade: false,
+      nextLabel: 'SONRAKİ YARIŞ',
+    });
+    await this._runRace('track2', 'race2', 'race2.pre', 'race2.post', {
+      nextLabel: 'SONRAKİ YARIŞ',
+    });
     await this._runRace('track3', 'race3', 'race3.pre', null);
     // Race 3 does not end. `_onOffCourse` takes it from here.
   }
 
-  async _runRace(trackId, phase, preBeat, postBeat) {
+  /**
+   * One race, start to finish, at the pace of a person rather than a loader.
+   *
+   *   fade to black → build the grid → fade in → name the parkour → hold →
+   *   3·2·1·GO → [the race] → the finish breathes → results, waiting on ENTER →
+   *   the closing line → hold → the next one.
+   *
+   * Every one of those steps is a wait the player can feel. Cutting straight
+   * from a finish line to the next countdown is what made three races read as
+   * one long menu.
+   */
+  async _runRace(trackId, phase, preBeat, postBeat, { fade = true, nextLabel } = {}) {
     const g = this.game;
     this._setPhase(phase);
-    this._racePost = postBeat;
     this._raceResolved = null;
 
+    // Black over the swap. Loading a grid in full view of the player is the
+    // one moment the illusion of a continuous place is cheapest to break.
+    if (fade) await g.ui.screens.fadeTo('#05070a', T.raceFadeOut);
     await g.modes.switchTo('race', {
       trackId,
       // Race 3's ending is the director's, not the results screen's.
       showResults: trackId !== 'track3',
-      countdown: true,
+      nextLabel,
+      // Hold on the grid: the fade-in below has to finish before the lights go
+      // out, or the countdown plays behind the curtain. See RaceMode#startCountdown.
+      countdown: 'deferred',
     });
-    this._play(preBeat);
+    if (fade) await g.ui.screens.fadeTo(null, T.raceFadeIn);
 
-    // Resolves when this race reports a finish (or, for track 3, never — the
-    // breakout resolves it instead).
+    // Name the parkour while the player is still sitting on the grid looking
+    // at it, then let it sit for a beat before the countdown takes over.
+    this._play(preBeat);
+    await this._wait(T.gridHold);
+    await g.modes.current?.startCountdown?.();
+
+    // Resolves when the player has seen the result and pressed on — NOT when
+    // the line is crossed. For track 3 it never resolves; the breakout does.
     await new Promise((resolve) => {
       this._raceResolved = resolve;
     });
@@ -169,8 +216,7 @@ export class IntroDirector {
     await this._wait(T.betweenRaces);
   }
 
-  _onRaceFinished(p) {
-    this.game.flags.racesCompleted++;
+  _onRaceDismissed(p) {
     if (this._raceResolved) {
       const r = this._raceResolved;
       this._raceResolved = null;
@@ -226,10 +272,20 @@ export class IntroDirector {
 
   _onOffCourse(p) {
     if (this.phase !== 'race3' || !p.isPlayer) return;
-    // Generous on purpose: a long slide OR a sustained excursion both count.
-    const far = p.distance > BREAKOUT.escapeDistance;
-    const sustained = p.distance > 30 && p.duration > BREAKOUT.escapeHoldSeconds;
-    if (!far && !sustained) return;
+
+    // Time it against `outOfBoundsTime`, never `duration`. `duration` counts
+    // from the first centimetre past the ribbon edge, which on a dirt parkur is
+    // most of the lap — so by the moment the player actually left it had been
+    // running for twenty seconds, every hold below was already satisfied, and
+    // the break fired the instant they crossed the distance line. The player
+    // never got to be lost; the game just glitched at them.
+    const out = p.outOfBoundsTime;
+
+    // Generous on purpose, but both paths now require the player to have been
+    // gone for a while: unambiguously far out, or merely out and not coming back.
+    const escaped = p.distance > BREAKOUT.escapeDistance && out > BREAKOUT.escapeHoldSeconds;
+    const stranded = out > BREAKOUT.strandedSeconds;
+    if (!escaped && !stranded) return;
 
     this._breakOut();
   }
