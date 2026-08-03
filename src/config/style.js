@@ -358,6 +358,22 @@ export const GROUND_PAINT = {
 
   /** Higher ground catches more light — a free, cheap sense of relief. */
   lift: { from: 10, range: 260, min: -0.1, max: 0.16 },
+
+  /**
+   * How a worn trail marks the ground it runs over. See `world/trails.js`;
+   * the SHAPE of the network is `OPEN_WORLD.trails`, this is only its colour.
+   *
+   * Toward the theme's own dirt, then darkened — a rut is bare earth AND it is
+   * in shadow, because it is a groove. Both, or it reads as a painted stripe.
+   */
+  trail: {
+    /** How far toward `ground.dirt` a fully worn vertex goes, 0..1. */
+    toDirt: 0.8,
+    /** …and how much darker on top of that. */
+    darken: 0.24,
+    /** Extra grit, because a used path is where the stones end up. */
+    grit: 0.12,
+  },
 };
 
 // ---------------------------------------------------------------------------

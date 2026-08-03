@@ -132,6 +132,20 @@ export class Terrain {
      */
     this.shaper = null;
 
+    /**
+     * Optional painter, installed before `buildMesh`. Gets the world position,
+     * the colour the palette produced (mutable, in place) and the slope.
+     *
+     * Sibling of `shaper`, and the same idea one layer up: `shaper` lets
+     * something that is not terrain change the SHAPE of the ground without the
+     * terrain knowing what a track is, and this lets something that is not
+     * terrain change its COLOUR on the same terms. The worn trails through the
+     * forest are drawn entirely through here — see `world/trails.js` — which is
+     * why they cost no geometry, no draw call and no texture.
+     * @type {null | ((x:number, z:number, rgb:number[], slope:number) => void)}
+     */
+    this.painter = null;
+
     this._offset = (seed % 997) * 13.37;
     this.chunks = [];
     this.root = null;
@@ -363,6 +377,7 @@ export class Terrain {
         // The normal is already here, so the slope the palette wants for its
         // wear gradient is one subtraction rather than four more samples.
         const c = palette.sample(this.surfaces[gj * n + gi], h, gi, gj, 1 - nrm.y);
+        if (this.painter) this.painter(x, z, c, 1 - nrm.y);
         colors[o] = c[0];
         colors[o + 1] = c[1];
         colors[o + 2] = c[2];

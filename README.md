@@ -161,8 +161,9 @@ with a car, a steering input and an assertion about which way it ended up.
 src/
   config/     tuning · camera · style · gameplay · settings   ← the knobs
   core/       loop · events · input · modes · rng · mathx
-  render/     renderer · postfx · psx · materials · cameraRig · geometry · lightPool
+  render/     renderer · postfx · psx · wind · materials · cameraRig · geometry · lightPool
   world/      terrain · track · scatter · props · collision · lighting · world
+              trails · groundCover · wildlife · trees
     tracks/   track1 · track2 · track3                ← parkours as data
   vehicle/    vehicle · chassis · ai · contacts
   audio/      procedural WebAudio — no asset files
@@ -271,6 +272,35 @@ that number and it never fires, which is exactly why the ground used to read as
 tinted noise. The thresholds in `GROUND_PAINT` are absolute, and the measured
 percentiles are written down next to them.
 
+### Somebody was here first
+
+`src/world/trails.js` wears routes into the world: one from each landmark down
+to the nearest parkour, a few between adjacent landmarks, and eleven **spurs** —
+short ruts that leave a parkour, go into the trees, and stop. The spurs do most
+of the storytelling, because they are the only ones the player is likely to
+meet, and a rut that ends in nothing says somebody pulled over here far better
+than a path between two landmarks does.
+
+None of it is geometry. A trail is a rule that darkens the terrain's own vertex
+colours while they are being baked, through **`Terrain#painter`** — the
+colour-space sibling of `Terrain#shaper`. `shaper` lets something that is not
+terrain change the shape of the ground without the terrain knowing what a track
+is; `painter` does the same for its colour. So the whole network costs one
+distance query per terrain vertex at build time and nothing at all afterwards:
+no draw call, no overdraw, no z-fighting with the ground it is drawn on, and it
+cross-fades with the theme like every other vertex colour in the world.
+
+Two things keep it from reading as painted stripes: routes wander (a seeded
+perpendicular offset, pinned at both ends) and they fade in and out along their
+length against a noise field, so most of any given path has grown back over.
+The ground cover shares the same field — grass does not grow on a path.
+
+**The resolution ceiling, stated plainly.** The heightfield has a vertex every
+13 m, so a two-metre tyre rut cannot be drawn here: it would fall between
+vertices and alias into nothing. What is drawn is a worn band a couple of
+vertices across. Ruts at their real width would need a second mesh, which is
+the thing this file exists to avoid.
+
 ### The grass is a pool, not scenery
 
 Ground cover used to be scattered like everything else: 5200 tufts over a
@@ -342,11 +372,12 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 217 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 232 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
 collision, ground-cover placement, the vertex-wind injection, the terrain's own
-vertex colours, the settings round trip, and the physics: 0–100, top speed, braking, understeer on ice, and a
-simulated human driving the third parkour's corner and coming off it.
+vertex colours, the worn trails, the settings round trip, and the physics:
+0–100, top speed, braking, understeer on ice, and a simulated human driving the
+third parkour's corner and coming off it.
 
 ### Bugs it caught, and one it could not
 

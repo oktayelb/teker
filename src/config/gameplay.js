@@ -385,6 +385,82 @@ export const OPEN_WORLD = {
       direction: { x: 0.82, z: 0.57 },
     },
   },
+
+  /**
+   * TRAILS — the ruts people wore into this place before you got here.
+   *
+   * The premise of the whole open world is that it is a real place somebody
+   * used to come to, and an untouched forest says the opposite. So there are
+   * faint worn routes from each landmark down to the nearest parkour, and a
+   * few between the landmarks themselves. They are drawn ENTIRELY as vertex
+   * colour on the terrain that already exists — no geometry, no draw call, no
+   * texture. See `world/trails.js` and `GROUND_PAINT.trail`.
+   *
+   * Subtlety is the whole brief. This is atmosphere, not a road network: a
+   * trail you can plan a route along is a road, and this world does not have
+   * roads outside the three parkours.
+   *
+   * A NOTE ON WIDTHS. The heightfield has a vertex every
+   * `terrainCellSize` (13m), so a two-metre tyre rut cannot be drawn here at
+   * all — it would fall between vertices and alias into nothing. What is
+   * achievable is a worn band a couple of vertices across, which from a car is
+   * what an old forest track looks like anyway.
+   */
+  trails: {
+    /** Metres either side of the centreline that are fully worn. */
+    coreWidth: 7,
+    /** …and where the wear has faded back into grass. */
+    edgeWidth: 17,
+    /** Waypoints per route. More = a wigglier path for the same wander. */
+    segments: 9,
+    /** Metres a route may wander off the straight line between its ends. */
+    wander: 90,
+    /**
+     * Routes between landmarks, as index pairs into `LANDMARK_DEFS`. Every
+     * landmark already gets a route down to the nearest parkour; these are the
+     * few that also connect to each other, and there are deliberately not many.
+     *
+     * Adjacent pairs only. The landmarks are 800m apart at best, so linking
+     * opposite ones draws a two-kilometre line across the entire map, and a
+     * trail long enough to navigate by is a road.
+     */
+    links: [
+      [2, 3],
+      [3, 4],
+      [0, 4],
+    ],
+    /**
+     * Short routes that leave a parkour, go into the trees, and stop.
+     *
+     * These do most of the storytelling, and they are the only trails the
+     * player is likely to meet, because they are where the player is. A rut
+     * that leads off the road and ends in nothing says somebody pulled over
+     * here far better than a path between two landmarks does — that one just
+     * says the map has a road network, which is the thing to avoid.
+     */
+    spurs: {
+      count: 11,
+      length: [110, 320],
+      /**
+       * How far from ANY parkour the far end has to finish, metres. All three
+       * parkours share one terrain, so a spur off one of them can quite easily
+       * land next to another — and a rut that leaves the road and rejoins it is
+       * a lay-by, which is a tidier and much less interesting story. Spurs that
+       * cannot clear this are simply not drawn.
+       */
+      clearEnd: 90,
+    },
+    /**
+     * Along-route patchiness: below this the route has grown over completely.
+     * Without it a trail is a stripe of uniform brown, which reads as painted.
+     */
+    fadeFrom: 0.3,
+    fadeTo: 0.62,
+    /** Grid cells per noise cycle for that patchiness. */
+    fadeScale: 0.0075,
+    /** Wear above which grass stops growing. A path with grass on it is a lawn. */
+    grassFreeAbove: 0.45,
+  },
   /** Seed for world generation — same seed, same world, every time. */
   seed: 0x7e4e17,
   /**

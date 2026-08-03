@@ -100,6 +100,13 @@ how to tune it and where to build the next act.
   and the rules in `GROUND_PAINT` (`style.js`). The wear thresholds are
   ABSOLUTE, not fractions of `cliffSlope` — see bug 19.
 
+- **P19** — Trails. Worn routes from every landmark to the nearest parkour, a
+  few links between adjacent landmarks, and eleven spurs that leave a parkour
+  and stop in the trees. Drawn entirely through the new `Terrain#painter` hook
+  (the colour-space sibling of `shaper`) — no mesh, no decal, no texture. The
+  ground cover shares the same field, so grass does not grow on a path.
+  `world/trails.js`, `OPEN_WORLD.trails`, `GROUND_PAINT.trail`.
+
 ## Bugs found so far (do not reintroduce)
 
 1. **Stability assist bypassed the grip ceiling.** It was applied after the yaw

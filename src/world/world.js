@@ -24,12 +24,31 @@ import { TrackLighting } from './lighting.js';
 import { Trees } from './trees.js';
 import { Wildlife } from './wildlife.js';
 import { GroundCover } from './groundCover.js';
+import { Trails } from './trails.js';
 import { OPEN_WORLD } from '../config/gameplay.js';
 import { surfaceById } from '../config/tuning.js';
 import { clamp01, lerp, smoothstep } from '../core/mathx.js';
 import { events } from '../core/events.js';
 
 const _normal = new THREE.Vector3();
+
+/**
+ * Points of interest, as data.
+ *
+ * Polar rather than cartesian so they survive a change of world radius, and
+ * module-scope rather than inline because the trail network needs to know
+ * where they are *before* the terrain mesh is built — a path that leads
+ * somewhere has to be painted into the ground at the same moment the ground is
+ * (`world/trails.js`). `OPEN_WORLD.trails.links` indexes into this array.
+ */
+export const LANDMARK_DEFS = [
+  { name: 'Vadi', label: 'the valley floor', angle: 0.4, dist: 0.34, radius: 90 },
+  { name: 'Kule', label: 'a radio mast, unlit', angle: 2.1, dist: 0.62, radius: 70 },
+  { name: 'Göl', label: 'still water', angle: 3.4, dist: 0.48, radius: 110 },
+  { name: 'Taşlar', label: 'stones in a ring', angle: 4.6, dist: 0.55, radius: 60 },
+  { name: 'Sırt', label: 'the ridge', angle: 5.5, dist: 0.72, radius: 100 },
+  { name: 'Kenar', label: 'where the fog does not lift', angle: 1.2, dist: 0.93, radius: 140 },
+];
 
 export class World {
   /**
@@ -58,6 +77,8 @@ export class World {
     this.wildlife = null;
     /** Grass, pooled around the camera the same way. See groundCover.js. */
     this.groundCover = null;
+    /** Worn routes, painted into the terrain's vertex colours. See trails.js. */
+    this.trails = null;
     /** Trunk damage and the disguise. See trees.js. */
     this.trees = new Trees();
     /** @type {{name:string,position:THREE.Vector3,radius:number,discovered:boolean}[]} */
@@ -115,6 +136,24 @@ export class World {
 
     await step('heightfield', 0.3, () => this.terrain.generate());
 
+    // Worn routes have to exist BEFORE the ground is coloured, because they
+    // are drawn into the ground's own vertex colours rather than on top of it.
+    // Only positions are needed here, which is why `LANDMARK_DEFS` is data at
+    // module scope and `_placeLandmarks` (which wants heights) can stay late.
+    await step('trails', 0.42, () => {
+      const span = this.terrain.halfSpan;
+      this.trails = new Trails({
+        halfSpan: span,
+        landmarks: LANDMARK_DEFS.map((d) => ({
+          x: Math.cos(d.angle) * span * d.dist,
+          z: Math.sin(d.angle) * span * d.dist,
+        })),
+        tracks: this._trackList,
+        seed: this.seed,
+      });
+      this.terrain.painter = this.trails.painter(this.theme);
+    });
+
     await step('terrain-mesh', 0.5, () => {
       this.root.add(this.terrain.buildMesh(this.materials, this.theme));
     });
@@ -136,15 +175,19 @@ export class World {
     if (scatter) {
       await step('forest', 0.72, () => this._scatterForest());
       await step('ground-cover', 0.86, () => {
+        // Grass stops at the verge for the same reason the trees do, and by the
+        // same rule — but tighter, because a track with a bare metre of dirt
+        // either side of it reads as maintained, which this one is not. It also
+        // stops on the worn routes: a path with grass growing down the middle
+        // of it is a lawn, and the ground under it is already painted as bare.
+        const offRoad = this._trackAvoidance(OPEN_WORLD.groundCover.trackClearance);
+        const worn = OPEN_WORLD.trails.grassFreeAbove;
         this.groundCover = new GroundCover({
           terrain: this.terrain,
           materials: this.materials,
           theme: this.theme,
           seed: this.seed ^ 0x6c0f,
-          // Grass stops at the verge for the same reason the trees do, and by
-          // the same rule — but tighter, because a track with a bare metre of
-          // dirt either side of it reads as maintained, which this one is not.
-          avoid: this._trackAvoidance(OPEN_WORLD.groundCover.trackClearance),
+          avoid: (x, z) => offRoad(x, z) || this.trails.strengthAt(x, z) > worn,
         }).build();
         this.root.add(this.groundCover.root);
       });
@@ -229,15 +272,7 @@ export class World {
    */
   _placeLandmarks() {
     const span = this.terrain.halfSpan;
-    const defs = [
-      { name: 'Vadi', label: 'the valley floor', angle: 0.4, dist: 0.34, radius: 90 },
-      { name: 'Kule', label: 'a radio mast, unlit', angle: 2.1, dist: 0.62, radius: 70 },
-      { name: 'Göl', label: 'still water', angle: 3.4, dist: 0.48, radius: 110 },
-      { name: 'Taşlar', label: 'stones in a ring', angle: 4.6, dist: 0.55, radius: 60 },
-      { name: 'Sırt', label: 'the ridge', angle: 5.5, dist: 0.72, radius: 100 },
-      { name: 'Kenar', label: 'where the fog does not lift', angle: 1.2, dist: 0.93, radius: 140 },
-    ];
-    for (const d of defs) {
+    for (const d of LANDMARK_DEFS) {
       const x = Math.cos(d.angle) * span * d.dist;
       const z = Math.sin(d.angle) * span * d.dist;
       this.landmarks.push({

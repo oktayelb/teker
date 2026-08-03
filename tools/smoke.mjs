@@ -1514,6 +1514,170 @@ section('11. the ground looks like ground');
 }
 
 // ---------------------------------------------------------------------------
+section('12. somebody was here first');
+
+// Worn trails are vertex-colour darkening on the terrain that already exists —
+// no mesh, no decal, no texture (world/trails.js). Which means the evidence
+// that they worked is in the same colour buffer as everything else, and a
+// headless run can check all of it: where the routes go, how much of the world
+// they touch, and whether the ground under them actually changed.
+{
+  const { OPEN_WORLD } = await import('../src/config/gameplay.js');
+  const { Trails } = await import('../src/world/trails.js');
+  const { LANDMARK_DEFS } = await import('../src/world/world.js');
+  const { TERRAIN_SHAPE } = await import('../src/world/terrain.js');
+  const { GROUND_PAINT: GP } = await import('../src/config/style.js');
+  const T = OPEN_WORLD.trails;
+  const trails = world.trails;
+  const terrain = world.terrain;
+
+  ok('the world has worn routes in it', !!trails && trails.routes.length > 0,
+    `${trails?.routes.length} routes, ${trails?.segments.length} segments`);
+  ok(
+    'one route per landmark, plus the links, plus the spurs',
+    trails.routes.length <= LANDMARK_DEFS.length + T.links.length + T.spurs.count &&
+      trails.routes.length >= LANDMARK_DEFS.length + T.links.length,
+    `${trails.routes.length} of at most ${LANDMARK_DEFS.length + T.links.length + T.spurs.count}`
+  );
+  ok('a trail is not geometry', !world.root.getObjectByName('trails') && typeof terrain.painter === 'function');
+
+  /** Distance from a point to the nearest parkour centreline sample. */
+  const toTrack = (p) => {
+    let best = Infinity;
+    for (const tk of world._trackList) {
+      for (let k = 0; k < tk.count; k++) {
+        best = Math.min(best, Math.hypot(tk.px[k] - p.x, tk.pz[k] - p.z));
+      }
+    }
+    return best;
+  };
+
+  // The first six routes are the landmark ones, in `LANDMARK_DEFS` order.
+  const span = terrain.halfSpan;
+  let atLandmark = 0;
+  let atTrack = 0;
+  for (let i = 0; i < LANDMARK_DEFS.length; i++) {
+    const d = LANDMARK_DEFS[i];
+    const route = trails.routes[i];
+    const want = { x: Math.cos(d.angle) * span * d.dist, z: Math.sin(d.angle) * span * d.dist };
+    if (Math.hypot(route[0].x - want.x, route[0].z - want.z) < 0.001) atLandmark++;
+    if (toTrack(route.at(-1)) < 0.001) atTrack++;
+  }
+  ok('every landmark route starts at its landmark', atLandmark === LANDMARK_DEFS.length,
+    `${atLandmark}/${LANDMARK_DEFS.length}`);
+  ok('…and ends on a parkour', atTrack === LANDMARK_DEFS.length, `${atTrack}/${LANDMARK_DEFS.length}`);
+
+  // A route that goes from A to B in a straight line is a survey line, not a
+  // path somebody wore. Every one of them has to leave the straight line.
+  let straightest = Infinity;
+  for (const route of trails.routes) {
+    const a = route[0];
+    const b = route.at(-1);
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    let off = 0;
+    for (const p of route) off = Math.max(off, pointLineDistance(p, a, b));
+    straightest = Math.min(straightest, off / Math.max(1, len));
+  }
+  ok('no route is a ruler line', straightest > 0.02, `least wander ${(100 * straightest).toFixed(1)}% of its length`);
+
+  // The spurs. These leave a parkour and end in the trees; a spur that comes
+  // back to the road is a lay-by, which is a different and much tidier story.
+  const spurs = trails.routes.slice(LANDMARK_DEFS.length + T.links.length);
+  let leaveRoad = 0;
+  for (const s of spurs) if (toTrack(s[0]) < 0.001 && toTrack(s.at(-1)) > 80) leaveRoad++;
+  ok('the spurs leave the road and stop in the trees', spurs.length > 0 && leaveRoad === spurs.length,
+    `${leaveRoad}/${spurs.length}`);
+
+  // SUBTLETY IS THE BRIEF. Atmosphere, not a road network.
+  const luma = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+  const green = (r, g, b) => g - (r + b) / 2;
+  let vertices = 0;
+  let touched = 0;
+  const wornRows = [];
+  const cleanRows = [];
+  for (const chunk of terrain.chunks) {
+    const pos = chunk.geometry.getAttribute('position');
+    const col = chunk.geometry.getAttribute('color');
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const h = pos.getY(i);
+      const z = pos.getZ(i);
+      vertices++;
+      const s = trails.strengthAt(x, z);
+      if (s > 0.5) touched++;
+      // Compare on dry ground only — above where the damp layer stops. It
+      // darkens the low places on its own, and the trails do not run uniformly
+      // across the height range, so mixing the two measures the wrong thing.
+      if (h < TERRAIN_SHAPE.waterLevel + GP.dampAbove) continue;
+      const rec = {
+        luma: luma(col.getX(i), col.getY(i), col.getZ(i)),
+        green: green(col.getX(i), col.getY(i), col.getZ(i)),
+      };
+      if (s > 0.6) wornRows.push(rec);
+      else if (s === 0) cleanRows.push(rec);
+    }
+  }
+  const share = (100 * touched) / vertices;
+  ok('the world is not paved', share < 4, `${share.toFixed(2)}% of the ground is worn`);
+  ok('…but it is marked', share > 0.2 && wornRows.length > 30,
+    `${touched} worn vertices, ${wornRows.length} of them on dry ground`);
+
+  const mean = (rows, key) => rows.reduce((s, r) => s + r[key], 0) / Math.max(1, rows.length);
+  ok(
+    'a worn route is darker than the ground beside it',
+    mean(wornRows, 'luma') < mean(cleanRows, 'luma') * 0.9,
+    `luma ${mean(cleanRows, 'luma').toFixed(4)} clean vs ${mean(wornRows, 'luma').toFixed(4)} worn`
+  );
+  ok(
+    '…and browner',
+    mean(wornRows, 'green') < mean(cleanRows, 'green') * 0.5,
+    `greenness ${mean(cleanRows, 'green').toFixed(4)} clean vs ${mean(wornRows, 'green').toFixed(4)} worn`
+  );
+
+  // Grass does not grow on a path. The ground cover shares the trail field.
+  {
+    let onPath = 0;
+    const probe = new THREE.Vector3();
+    const mid = trails.routes[0][Math.floor(trails.routes[0].length / 2)];
+    probe.set(mid.x, terrain.heightAt(mid.x, mid.z), mid.z);
+    world.groundCover.update(1 / 60, probe);
+    const mm = new THREE.Matrix4();
+    for (const g of world.groundCover._groups) {
+      for (let i = 0; i < g.items.length; i++) {
+        g.mesh.getMatrixAt(i, mm);
+        const e = mm.elements;
+        if (Math.hypot(e[0], e[1], e[2]) < 1e-4) continue;
+        if (trails.strengthAt(e[12], e[14]) > T.grassFreeAbove) onPath++;
+      }
+    }
+    ok('grass does not grow on a worn path', onPath === 0, `${onPath} tufts on the trail`);
+  }
+
+  // Deterministic from the seed, like everything else that generates the world.
+  {
+    const marks = LANDMARK_DEFS.map((d) => ({
+      x: Math.cos(d.angle) * span * d.dist,
+      z: Math.sin(d.angle) * span * d.dist,
+    }));
+    const mk = (seed) => new Trails({ halfSpan: span, landmarks: marks, tracks: world._trackList, seed });
+    const a = mk(0x7e4e17);
+    const b = mk(0x7e4e17);
+    const c = mk(0x51ee11);
+    const same = JSON.stringify(a.routes) === JSON.stringify(b.routes);
+    const different = JSON.stringify(a.routes) !== JSON.stringify(c.routes);
+    ok('same seed, same trails', same, `${a.routes.length} routes compared`);
+    ok('…and a different seed wears the ground somewhere else', different);
+  }
+}
+
+function pointLineDistance(p, a, b) {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  return Math.abs((p.x - a.x) * dz - (p.z - a.z) * dx) / len;
+}
+
+// ---------------------------------------------------------------------------
 console.log(
   `\n${failures === 0 ? '\x1b[32m' : '\x1b[31m'}${checks - failures}/${checks} checks passed\x1b[0m\n`
 );
