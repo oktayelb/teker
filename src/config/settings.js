@@ -30,12 +30,23 @@ export const SETTINGS_SCHEMA = [
     id: 'audio',
     label: 'SES',
     items: [
+      // THE MIX IS NOT FLAT, AND THAT IS THE POINT.
+      //
+      // Everything used to default to 100%, which put the engine on top of the
+      // whole game — it is the one sound that never stops, and at parity it
+      // buries the forest, the weather and the music the rest of the time is
+      // made of. This is a place with an engine in it, not an engine with a
+      // place around it.
+      //
+      // Note `ambienceVolume` is applied ON TOP of `musicVolume` (see
+      // `Game#_applySetting`), so the ambience bus really sits at music ×
+      // ambience. Retune one and check the other.
       { id: 'muted', label: 'Sessiz', type: 'toggle', default: false },
       { id: 'masterVolume', label: 'Ana Ses', type: 'slider', min: 0, max: 1, step: 0.05, default: 0.8, format: pct },
-      { id: 'musicVolume', label: 'Müzik', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 1, format: pct },
-      { id: 'sfxVolume', label: 'Efektler', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 1, format: pct },
-      { id: 'engineVolume', label: 'Motor', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 1, format: pct },
-      { id: 'ambienceVolume', label: 'Ortam', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 1, format: pct },
+      { id: 'musicVolume', label: 'Müzik', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 1.1, format: pct },
+      { id: 'sfxVolume', label: 'Efektler', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 0.35, format: pct },
+      { id: 'engineVolume', label: 'Motor', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 0.25, format: pct },
+      { id: 'ambienceVolume', label: 'Ortam', type: 'slider', min: 0, max: 1.5, step: 0.05, default: 1.15, format: pct },
     ],
   },
   {
