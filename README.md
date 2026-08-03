@@ -275,6 +275,8 @@ off and leaves it standing where you dropped it (`Trees#update`).
 
 ## Where to continue
 
+**[`DESIGN.md`](DESIGN.md)** — the roadmap: what the second act could be, what to build in what order, and what would damage the game.
+
 `?skip=intro` drops you into `OpenWorldMode` with a car, a world, and no rules.
 That is the seam. Some places to build from:
 
