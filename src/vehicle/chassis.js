@@ -282,7 +282,13 @@ export function createChassis({
     update(v, dt) {
       // Wheels: spin from real distance travelled so they never look detached.
       wheelSpin -= (v.longSpeed / wheelRadius) * dt;
-      const steer = v.steerAngle;
+      // NEGATED, and it has to be. `steerAngle > 0` means "turn right" (see the
+      // convention note at the top of `vehicle.js`), but the car's object is
+      // yawed by `setFromAxisAngle(up, heading)`, which maps local +X onto the
+      // driver's LEFT. A positive rotation about local Y therefore points the
+      // wheel the opposite way to the one the car is going — the front tyres
+      // visibly scrubbed outward through every corner.
+      const steer = -v.steerAngle;
       for (const w of wheels) {
         w.rotation.set(0, w.userData.front ? steer : 0, 0);
         w.rotateX(wheelSpin);
