@@ -147,6 +147,15 @@ export class Vehicle {
     /** Local +Z offsets of each probe, rear to front. */
     this.collisionProbes = [-reach, 0, reach];
     this.collisionHeight = T.halfExtents.y * 2;
+
+    /**
+     * Half-extents of the rectangle the ground is sampled over — the car's
+     * footprint, shrunk by `groundFootprint`. See tuning.js: this is the whole
+     * fix for the car sinking into hillsides. The lateral term matters as much
+     * as the longitudinal one, because a car crossing a bank buries a *flank*.
+     */
+    this.groundReach = T.halfExtents.z * (T.groundFootprint ?? 0);
+    this.groundReachLat = T.halfExtents.x * (T.groundFootprint ?? 0);
   }
 
   /** World position of collision probe `i`. */
@@ -216,6 +225,21 @@ export class Vehicle {
     this.right.set(-c, 0, s);
   }
 
+  /**
+   * Where the ground is under this car.
+   *
+   * THE CAR IS NOT A POINT. The normal and the surface are read at the centre —
+   * they want to be smooth and they want to be one answer — but the *height* is
+   * the highest ground anywhere under the bodywork, sampled fore and aft. A
+   * rigid body on a slope rests on its highest contact; sampling the centre
+   * only is what let the nose sit a metre inside a hillside while the physics
+   * insisted the car was on top of it.
+   *
+   * Note this can only ever raise the car, never lower it, which is why it
+   * cannot reintroduce PROGRESS.md bug #2 (the car going airborne on every
+   * downhill step): going downhill the rear probe now holds the ground *up*,
+   * so the surface falls away more slowly than before, not faster.
+   */
   _sampleGround() {
     if (!this.world?.sampleGround) {
       this.groundHeight = 0;
@@ -224,9 +248,30 @@ export class Vehicle {
       return;
     }
     const g = this.world.sampleGround(this.position.x, this.position.z);
-    this.groundHeight = g.height;
     this.groundNormal.copy(g.normal);
     this.surface = surfaceById(this.ignoreSurfaces ? 'TARMAC' : g.surface);
+
+    let height = g.height;
+    if (this.groundReach > 0 && this.world.groundHeightAt) {
+      // Four corners of the footprint. Four samples rather than the obvious
+      // eight or nine: a plane is decided by three points, and the corners are
+      // where a rectangle first touches a slope.
+      const fx = this.forward.x * this.groundReach;
+      const fz = this.forward.z * this.groundReach;
+      const rx = this.right.x * this.groundReachLat;
+      const rz = this.right.z * this.groundReachLat;
+      const px = this.position.x;
+      const pz = this.position.z;
+      const h1 = this.world.groundHeightAt(px + fx + rx, pz + fz + rz);
+      const h2 = this.world.groundHeightAt(px + fx - rx, pz + fz - rz);
+      const h3 = this.world.groundHeightAt(px - fx + rx, pz - fz + rz);
+      const h4 = this.world.groundHeightAt(px - fx - rx, pz - fz - rz);
+      if (h1 > height) height = h1;
+      if (h2 > height) height = h2;
+      if (h3 > height) height = h3;
+      if (h4 > height) height = h4;
+    }
+    this.groundHeight = height;
   }
 
   // -------------------------------------------------------------------------
