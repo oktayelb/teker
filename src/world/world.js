@@ -307,6 +307,27 @@ export class World {
     return { height, normal: _normal, surface };
   }
 
+  /**
+   * Just the height, for callers that ask several times per step and do not
+   * care about the surface or the normal — see `Vehicle#_sampleGround`, which
+   * probes the ground fore and aft of the car so the nose stops burying itself
+   * in hillsides. Skipping `normalAt` alone saves four heightfield samples.
+   * @returns {number} metres
+   */
+  groundHeightAt(x, z) {
+    const terrainH = this.terrain.heightAt(x, z);
+    for (const t of this._trackList) {
+      const q = t.query(x, z, this._query);
+      if (!q) continue;
+      const inner = q.halfWidth + ROAD.shoulderWidth;
+      const reach = Math.max(inner, q.halfWidth + q.runoff);
+      if (q.dist > reach + 9) continue;
+      const w = 1 - smoothstep(inner, inner + 9, q.dist);
+      return lerp(terrainH, q.height + ROAD.roadLift, w);
+    }
+    return terrainH;
+  }
+
   /** @see CollisionGrid#resolve */
   collide(position, radius) {
     return this.collision.resolve(position, radius, 1.4);

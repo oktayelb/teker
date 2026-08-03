@@ -1,10 +1,26 @@
 /**
  * TERRAIN — the heightfield the whole world sits on.
  *
- * Heights are baked into a grid once, then sampled with bilinear interpolation.
- * Baking (rather than evaluating noise per query) matters because the physics
- * asks for the ground several times per car per step, and because the collision
- * surface then provably matches the mesh you can see.
+ * Heights are baked into a grid once, then sampled. Baking (rather than
+ * evaluating noise per query) matters because the physics asks for the ground
+ * several times per car per step, and because the collision surface then
+ * provably matches the mesh you can see.
+ *
+ * THE SURFACE IS TRIANGLES, NOT A BILINEAR PATCH
+ * ----------------------------------------------
+ * This used to be sampled with bilinear interpolation while the mesh was
+ * triangulated with an alternating diagonal. Those are two different surfaces:
+ * they agree at the four corners of a cell and nowhere else, and at the centre
+ * they differ by exactly the cell's twist, `(h00 + h11 - h01 - h10) / 4`. On
+ * natural ground that is centimetres. Where a track's shaper flattens the land
+ * beside the road it reaches 3.9 m — and a car parked on a surface 3.5 m below
+ * the one being drawn is a car inside a hill.
+ *
+ * So `heightAt` evaluates the *triangle plane*, and both it and the mesh
+ * builder get the diagonal from `cellIsAntiDiagonal()`. One rule, one function,
+ * and the two can no longer drift apart. `smoothHeightAt` keeps the old
+ * bilinear surface for `normalAt`, which wants a continuous gradient field
+ * rather than the truth (see the note there).
  *
  * The mesh is split into chunks so frustum culling can throw away most of the
  * world — with the fog this dense, you are only ever looking at a few of them.
@@ -13,6 +29,8 @@
 import * as THREE from 'three';
 import { fbm2, valueNoise2, clamp, clamp01, lerp, smoothstep } from '../core/mathx.js';
 import { GeomBuilder } from '../render/geometry.js';
+
+const _slopeNormal = new THREE.Vector3();
 
 /** Terrain shape. All of it is tunable; none of it is load-bearing for gameplay. */
 export const TERRAIN_SHAPE = {
@@ -38,6 +56,53 @@ export const TERRAIN_SHAPE = {
   /** Slope (0..1, 1 = vertical) above which ground becomes bare rock. */
   cliffSlope: 0.55,
 };
+
+// ---------------------------------------------------------------------------
+// THE CELL DIAGONAL — the one rule the sampler and the mesh must share
+// ---------------------------------------------------------------------------
+
+/**
+ * Which way grid cell (gi, gj) is split into two triangles.
+ *
+ * The alternating diagonal exists to kill the directional "corduroy" a
+ * uniformly split grid produces on slopes. It also means the ground under the
+ * car is one of two different planes depending on a parity bit, and *anything*
+ * that wants to know where the ground is has to ask the same question the mesh
+ * builder asked. This function is that question. Do not inline it.
+ *
+ * Note the arguments are GLOBAL grid indices. Chunks happen to be an even
+ * number of cells across, so chunk-local parity currently matches — but that
+ * is a coincidence waiting to become a bug the first time `chunkCells` is odd.
+ *
+ * @param {number} gi global grid column
+ * @param {number} gj global grid row
+ * @returns {boolean} true = split along the anti-diagonal (tx + tz = 1)
+ */
+export function cellIsAntiDiagonal(gi, gj) {
+  return ((gi + gj) & 1) === 1;
+}
+
+/**
+ * Height on the triangle the mesh actually drew.
+ *
+ * @param {number} h00 corner at (gi, gj)
+ * @param {number} h10 corner at (gi+1, gj)
+ * @param {number} h01 corner at (gi, gj+1)
+ * @param {number} h11 corner at (gi+1, gj+1)
+ * @param {number} tx 0..1 across the cell
+ * @param {number} tz 0..1 down the cell
+ * @param {boolean} anti from `cellIsAntiDiagonal`
+ */
+export function cellTriangleHeight(h00, h10, h01, h11, tx, tz, anti) {
+  if (anti) {
+    // Triangles (a,c,b) and (b,c,e) — the seam runs from (1,0) to (0,1).
+    if (tx + tz <= 1) return h00 + tx * (h10 - h00) + tz * (h01 - h00);
+    return h11 + (1 - tx) * (h01 - h11) + (1 - tz) * (h10 - h11);
+  }
+  // Triangles (a,c,e) and (a,e,b) — the seam runs from (0,0) to (1,1).
+  if (tz >= tx) return h00 + tz * (h01 - h00) + tx * (h11 - h01);
+  return h00 + tx * (h10 - h00) + tz * (h11 - h10);
+}
 
 export class Terrain {
   /**
@@ -145,6 +210,12 @@ export class Terrain {
     return { fx, fz };
   }
 
+  /**
+   * The ground, on the surface that is actually being drawn.
+   *
+   * This is the physics contract: whatever this returns, the player can see.
+   * @returns {number} world-space height in metres
+   */
   heightAt(x, z) {
     const n = this.gridSize;
     const { fx, fz } = this._gridCoords(x, z);
@@ -152,22 +223,63 @@ export class Terrain {
     const j = clamp(Math.floor(fz), 0, n - 2);
     const tx = clamp01(fx - i);
     const tz = clamp01(fz - j);
-    const h00 = this.heights[j * n + i];
-    const h10 = this.heights[j * n + i + 1];
-    const h01 = this.heights[(j + 1) * n + i];
-    const h11 = this.heights[(j + 1) * n + i + 1];
-    return lerp(lerp(h00, h10, tx), lerp(h01, h11, tx), tz);
+    const row = j * n + i;
+    return cellTriangleHeight(
+      this.heights[row],
+      this.heights[row + 1],
+      this.heights[row + n],
+      this.heights[row + n + 1],
+      tx,
+      tz,
+      cellIsAntiDiagonal(i, j)
+    );
+  }
+
+  /**
+   * The old bilinear surface — smooth, and wrong by up to the cell's twist.
+   *
+   * It survives for exactly one caller: `normalAt`. A gradient taken across the
+   * true triangulated surface is piecewise constant and jumps at every facet
+   * seam, and the car lies down on that normal every frame — see the comment on
+   * `normalAt`. So the *height* comes from the triangles and the *slope* comes
+   * from a smoothed field, which is the standard heightfield compromise and the
+   * only place the two surfaces are allowed to disagree.
+   */
+  smoothHeightAt(x, z) {
+    const n = this.gridSize;
+    const { fx, fz } = this._gridCoords(x, z);
+    const i = clamp(Math.floor(fx), 0, n - 2);
+    const j = clamp(Math.floor(fz), 0, n - 2);
+    const tx = clamp01(fx - i);
+    const tz = clamp01(fz - j);
+    const row = j * n + i;
+    return lerp(
+      lerp(this.heights[row], this.heights[row + 1], tx),
+      lerp(this.heights[row + n], this.heights[row + n + 1], tx),
+      tz
+    );
   }
 
   /** Smooth normal from the height gradient. Cheaper than triangle normals and
-   *  it does not make the car twitch as it crosses facet boundaries. */
+   *  it does not make the car twitch as it crosses facet boundaries — which is
+   *  why it samples `smoothHeightAt` rather than the faceted `heightAt`. */
   normalAt(x, z, out = new THREE.Vector3()) {
     const e = this.cellSize * 0.5;
-    const hL = this.heightAt(x - e, z);
-    const hR = this.heightAt(x + e, z);
-    const hD = this.heightAt(x, z - e);
-    const hU = this.heightAt(x, z + e);
+    const hL = this.smoothHeightAt(x - e, z);
+    const hR = this.smoothHeightAt(x + e, z);
+    const hD = this.smoothHeightAt(x, z - e);
+    const hU = this.smoothHeightAt(x, z + e);
     return out.set(hL - hR, 2 * e, hD - hU).normalize();
+  }
+
+  /**
+   * How steep the ground is here, 0 (flat) .. 1 (vertical), on the same metric
+   * `TERRAIN_SHAPE.cliffSlope` and `SCATTER_RULES.maxSlope` are expressed in.
+   * @returns {number}
+   */
+  slopeAt(x, z) {
+    this.normalAt(x, z, _slopeNormal);
+    return 1 - _slopeNormal.y;
   }
 
   surfaceAt(x, z) {
@@ -264,8 +376,11 @@ export class Terrain {
         const c = a + w;
         const e = c + 1;
         // Alternating diagonal removes the directional "corduroy" artefact a
-        // uniformly split grid produces on slopes.
-        if ((ii + jj) & 1) {
+        // uniformly split grid produces on slopes. `cellIsAntiDiagonal` is the
+        // ONLY place that rule is written down — `heightAt` reads the same
+        // function, which is what stops the physics surface and the drawn
+        // surface from ever describing different hills again.
+        if (cellIsAntiDiagonal(i0 + ii, j0 + jj)) {
           indices[k++] = a; indices[k++] = c; indices[k++] = b;
           indices[k++] = b; indices[k++] = c; indices[k++] = e;
         } else {

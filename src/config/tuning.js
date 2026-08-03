@@ -112,6 +112,24 @@ export const PROFILES = {
 
     // -- Suspension / visuals ---------------------------------------------
     rideHeight: 0.42,
+    /**
+     * How far fore and aft of the centre the ground is sampled, as a fraction
+     * of `halfExtents.z`. THIS IS WHY THE CAR NO LONGER SINKS INTO HILLS.
+     *
+     * The car rides on the highest ground under its footprint, the way a rigid
+     * body on four wheels does. Sampling only the centre — which is what this
+     * used to do — puts the nose 1.2 m inside a 30° bank, because the ground
+     * 2 m ahead of a point is not the ground at that point. Measured over the
+     * real world: a fifth of all car placements had a body corner more than a
+     * ride-height above the centre sample.
+     *
+     * 0 restores the old point sample. Above ~0.9 the car starts visibly
+     * hovering over dips, because it is bridging them — which is correct, and
+     * which you can see. It also must not be so large that the nose finds
+     * ground the *bumper* has not reached: this is deliberately inside the
+     * bodywork, not at the corners.
+     */
+    groundFootprint: 0.82,
     suspensionStiffness: 9.0, // how fast the body settles onto the terrain normal
     bodyRollGain: 0.055, // radians of lean per unit of lateral acceleration
     bodyPitchGain: 0.035, // radians of squat/dive per unit of longitudinal accel

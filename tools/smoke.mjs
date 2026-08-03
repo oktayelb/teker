@@ -149,6 +149,143 @@ for (let i = 0; i < t3.count; i += 3) {
 }
 ok('road surface is smooth', maxStep < 2.2, `max step ${maxStep.toFixed(2)}m over 9m`);
 
+// ---------------------------------------------------------------------------
+// THE GROUND YOU CAN SEE IS THE GROUND YOU DRIVE ON
+//
+// `Terrain#heightAt` used to interpolate bilinearly while the mesh was
+// triangulated with an alternating diagonal. Those are two different surfaces:
+// they agree at the corners of a cell and nowhere else, and at the centre they
+// differ by the cell's twist. On natural ground that is centimetres; where a
+// track's shaper flattens the land beside the road it reached 3.9m, and the
+// car was parked 3.5m below the hill it was standing on. This is the check
+// that stops the sampler and the mesh builder ever drifting apart again.
+{
+  const { cellIsAntiDiagonal, cellTriangleHeight } = await import('../src/world/terrain.js');
+  const terrain = world.terrain;
+  const n = terrain.gridSize;
+  const cs = terrain.cellSize;
+  const half = terrain.halfSpan;
+
+  /**
+   * Height read straight off the rendered chunk geometry: find the triangle
+   * containing (x, z) by barycentric test and evaluate its plane. This is
+   * deliberately NOT a call into Terrain — it reads the index buffer the GPU
+   * gets, so nothing about the sampler can make it agree by construction.
+   */
+  const chunkFor = (x, z) => {
+    for (const mesh of terrain.chunks) {
+      const pos = mesh.geometry.getAttribute('position');
+      const idx = mesh.geometry.index;
+      const bb = mesh.geometry.boundingBox ?? (mesh.geometry.computeBoundingBox(), mesh.geometry.boundingBox);
+      if (x < bb.min.x - 0.01 || x > bb.max.x + 0.01 || z < bb.min.z - 0.01 || z > bb.max.z + 0.01) continue;
+      for (let f = 0; f < idx.count; f += 3) {
+        const a = idx.getX(f), b = idx.getX(f + 1), c = idx.getX(f + 2);
+        const ax = pos.getX(a), az = pos.getZ(a);
+        const bx = pos.getX(b), bz = pos.getZ(b);
+        const cx = pos.getX(c), cz = pos.getZ(c);
+        const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+        if (Math.abs(d) < 1e-9) continue;
+        const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d;
+        const l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+        const l3 = 1 - l1 - l2;
+        if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
+        return l1 * pos.getY(a) + l2 * pos.getY(b) + l3 * pos.getY(c);
+      }
+    }
+    return null;
+  };
+
+  let worstMesh = 0;
+  let checkedMesh = 0;
+  for (let k = 0; k < 400; k++) {
+    // Concentrated near the tracks, which is where the shaper makes the twist
+    // large and where the player actually is.
+    const tr = t3;
+    const i = Math.floor((k / 400) * tr.count);
+    const off = ((k * 37) % 61) - 30;
+    const x = tr.px[i] + tr.rx[i] * off;
+    const z = tr.pz[i] + tr.rz[i] * off;
+    if (!terrain.contains(x, z)) continue;
+    const fromMesh = chunkFor(x, z);
+    if (fromMesh === null) continue;
+    checkedMesh++;
+    worstMesh = Math.max(worstMesh, Math.abs(terrain.heightAt(x, z) - fromMesh));
+  }
+  ok(
+    'sampled ground matches the triangle the GPU is drawing',
+    checkedMesh > 300 && worstMesh < 0.01,
+    `${checkedMesh} points beside parkur 3, worst disagreement ${worstMesh.toFixed(5)}m`
+  );
+
+  // The same thing over the whole world, cheaply, against the shared helper.
+  let worstAll = 0;
+  let biggestTwist = 0;
+  for (let k = 0; k < 120000; k++) {
+    const x = (((k * 2654435761) >>> 0) / 4294967296 * 2 - 1) * half * 0.98;
+    const z = (((k * 40503 + 12345) % 65536) / 65536 * 2 - 1) * half * 0.98;
+    const fx = (x + half) / cs;
+    const fz = (z + half) / cs;
+    const i = Math.min(Math.max(Math.floor(fx), 0), n - 2);
+    const j = Math.min(Math.max(Math.floor(fz), 0), n - 2);
+    const row = j * n + i;
+    const h00 = terrain.heights[row], h10 = terrain.heights[row + 1];
+    const h01 = terrain.heights[row + n], h11 = terrain.heights[row + n + 1];
+    const expect = cellTriangleHeight(h00, h10, h01, h11, fx - i, fz - j, cellIsAntiDiagonal(i, j));
+    worstAll = Math.max(worstAll, Math.abs(terrain.heightAt(x, z) - expect));
+    biggestTwist = Math.max(biggestTwist, Math.abs((h00 + h11 - h01 - h10) / 4));
+  }
+  ok('…everywhere, not just near the road', worstAll < 1e-9, `120k points, worst ${worstAll.toExponential(1)}m`);
+  // If this ever reads ~0 the twist has gone away and the check above has
+  // stopped proving anything. It is the size of the bug that was fixed.
+  ok(
+    'the twist that caused it is still there to be got wrong',
+    biggestTwist > 0.5,
+    `worst cell twist ${biggestTwist.toFixed(2)}m — that was the burial depth`
+  );
+
+  // Corners are the one place the two surfaces always agreed, so they are the
+  // control: a sampler that returned nonsense would fail here too.
+  let cornerErr = 0;
+  for (let j = 4; j < n - 4; j += 17) {
+    for (let i = 4; i < n - 4; i += 17) {
+      const x = -half + i * cs;
+      const z = -half + j * cs;
+      cornerErr = Math.max(cornerErr, Math.abs(terrain.heightAt(x, z) - terrain.heights[j * n + i]));
+    }
+  }
+  ok('grid corners still read exactly', cornerErr < 1e-6, `worst ${cornerErr.toExponential(1)}m`);
+
+  // normalAt must NOT have gone faceted along with heightAt. It is what the car
+  // lies down on every frame; a gradient taken across triangles steps at every
+  // seam, and the body twitches. Pin the two surfaces apart: the height comes
+  // from the facets, the slope comes from the smooth field, and this is the
+  // only place in the codebase they are allowed to disagree.
+  const e = terrain.cellSize * 0.5;
+  const nrm = new THREE.Vector3();
+  const expect = new THREE.Vector3();
+  let worstNormalErr = 0;
+  let facetGap = 0;
+  for (let k = 0; k < 3000; k++) {
+    const x = (((k * 7919) % 1999) / 1999 * 2 - 1) * half * 0.9;
+    const z = (((k * 104729) % 2003) / 2003 * 2 - 1) * half * 0.9;
+    terrain.normalAt(x, z, nrm);
+    expect
+      .set(
+        terrain.smoothHeightAt(x - e, z) - terrain.smoothHeightAt(x + e, z),
+        2 * e,
+        terrain.smoothHeightAt(x, z - e) - terrain.smoothHeightAt(x, z + e)
+      )
+      .normalize();
+    worstNormalErr = Math.max(worstNormalErr, nrm.distanceTo(expect));
+    facetGap = Math.max(facetGap, Math.abs(terrain.heightAt(x, z) - terrain.smoothHeightAt(x, z)));
+  }
+  ok(
+    'normalAt still reads the smooth surface, not the facets',
+    worstNormalErr < 1e-9 && facetGap > 0.2,
+    `3k points identical to the bilinear gradient; the two surfaces differ by up to ${facetGap.toFixed(2)}m, so this is not vacuous`
+  );
+}
+
 // Winding. A back-facing surface does not look broken, it looks *absent* —
 // you see through it to whatever is behind. The road shipped inside-out once
 // and presented as "the tarmac renders as grass".
@@ -734,6 +871,80 @@ if (tree) {
   events.emit('chase:escaped', {});
   ok('ditching the first cops is what makes the forest breakable', forest.breakable === true);
   forest.dispose();
+}
+
+// ---------------------------------------------------------------------------
+// THE CAR IS NOT A POINT
+//
+// `Vehicle` stuck itself to the ground sampled at its own centre, so on any
+// slope the nose or a flank was inside the hill while the physics insisted the
+// car was on top of it. Drive the real car across the real world and measure
+// how far the bodywork ends up under the terrain — using the visual transform,
+// tilt and all, because that is what the player is complaining about.
+{
+  const FLOOR_Y = 0.01; // underside of the body shell, see chassis.js
+  const p = new THREE.Vector3();
+
+  const drive = (footprint) => {
+    let worst = 0;
+    let buried = 0;
+    let samples = 0;
+    let seed = 12345;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let r = 0; r < 12; r++) {
+      const a = rnd() * Math.PI * 2;
+      const d = 200 + rnd() * 900;
+      const car = new Vehicle({ profile: 'hatchback', world, id: `dig${r}` });
+      car.groundReach = car.tuning.halfExtents.z * footprint;
+      car.groundReachLat = car.tuning.halfExtents.x * footprint;
+      car.reset(new THREE.Vector3(Math.cos(a) * d, 0, Math.sin(a) * d), rnd() * Math.PI * 2);
+      let steer = 0;
+      for (let s = 0; s < 120 * 14; s++) {
+        if (s % 90 === 0) steer = (rnd() * 2 - 1) * 0.55;
+        car.setCommand({ throttle: 0.85, brake: 0, steer, handbrake: 0 });
+        car.fixedUpdate(1 / 120);
+        car.syncVisual(1, 1 / 120);
+        if (s % 8 || !car.grounded) continue;
+        if (!world.terrain.contains(car.position.x, car.position.z)) break;
+        car.object.updateMatrixWorld(true);
+        const hx = car.tuning.halfExtents.x;
+        const hz = car.tuning.halfExtents.z;
+        let deepest = 0;
+        for (const sz of [-hz, 0, hz]) {
+          for (const sx of [-hx, hx]) {
+            p.set(sx, FLOOR_Y, sz).applyMatrix4(car.object.matrixWorld);
+            if (!world.terrain.contains(p.x, p.z)) continue;
+            deepest = Math.max(deepest, world.groundHeightAt(p.x, p.z) - p.y);
+          }
+        }
+        samples++;
+        if (deepest > 0.05) buried++;
+        worst = Math.max(worst, deepest);
+      }
+    }
+    return { worst, rate: buried / samples, samples };
+  };
+
+  const point = drive(0); // the old behaviour, for contrast
+  const footprint = drive(resolveProfile('hatchback').groundFootprint);
+  ok(
+    'the car does not drive inside hills any more',
+    footprint.worst < 1.0 && footprint.rate < 0.01,
+    `worst ${footprint.worst.toFixed(2)}m under ground, ${(footprint.rate * 100).toFixed(2)}% of ${footprint.samples} samples`
+  );
+  ok(
+    '…and that is the footprint sampler doing it, not luck',
+    footprint.worst < point.worst * 0.75 && footprint.rate < point.rate * 0.5,
+    `centre-only: ${point.worst.toFixed(2)}m / ${(point.rate * 100).toFixed(2)}%`
+  );
+  ok(
+    'the ground probes sit inside the bodywork',
+    resolveProfile('hatchback').groundFootprint > 0 && resolveProfile('hatchback').groundFootprint <= 1,
+    `groundFootprint ${resolveProfile('hatchback').groundFootprint}`
+  );
 }
 
 // ---------------------------------------------------------------------------
