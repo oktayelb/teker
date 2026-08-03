@@ -252,6 +252,25 @@ the question the sirens ask.
 
 `CHASE.mercyAfter` guarantees you win eventually. It is a scene, not a skill check.
 
+### Dirt, and why the slope thresholds are absolute
+
+`buildPalette` in `src/world/terrain.js` bakes four layers into the terrain's
+vertex colours — turf mottling, **wear** to bare earth as the land tips over,
+**damp** darkening down toward `TERRAIN_SHAPE.waterLevel`, and **grit**. The
+colours are per-theme (`ground.dirt` / `ground.mud` / `ground.grit`); the rules
+are one block, `GROUND_PAINT` in `style.js`. It is all free: the mesh already
+carries a colour attribute.
+
+The obvious way to write the wear thresholds is as fractions of
+`TERRAIN_SHAPE.cliffSlope`, so that retuning what counts as a cliff drags the
+bare earth with it. Do not. **This valley has no cliffs.** Measured over the
+built world the median slope is 0.004, the 90th percentile 0.056, and the
+steepest vertex anywhere is 0.43 — against a `cliffSlope` of 0.55. Not one
+vertex in 48,841 classifies as `CLIFF` and only 78 as `DIRT`. Hang anything off
+that number and it never fires, which is exactly why the ground used to read as
+tinted noise. The thresholds in `GROUND_PAINT` are absolute, and the measured
+percentiles are written down next to them.
+
 ### The grass is a pool, not scenery
 
 Ground cover used to be scattered like everything else: 5200 tufts over a
@@ -323,10 +342,10 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 207 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 217 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
-collision, ground-cover placement, the vertex-wind injection, the settings round
-trip, and the physics: 0–100, top speed, braking, understeer on ice, and a
+collision, ground-cover placement, the vertex-wind injection, the terrain's own
+vertex colours, the settings round trip, and the physics: 0–100, top speed, braking, understeer on ice, and a
 simulated human driving the third parkour's corner and coming off it.
 
 ### Bugs it caught, and one it could not

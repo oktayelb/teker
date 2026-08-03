@@ -28,7 +28,7 @@
 
 import * as THREE from 'three';
 import { fbm2, valueNoise2, clamp, clamp01, lerp, smoothstep } from '../core/mathx.js';
-import { GeomBuilder } from '../render/geometry.js';
+import { GROUND_PAINT } from '../config/style.js';
 
 const _slopeNormal = new THREE.Vector3();
 
@@ -360,7 +360,9 @@ export class Terrain {
         normals[o + 1] = nrm.y;
         normals[o + 2] = nrm.z;
 
-        const c = palette.sample(this.surfaces[gj * n + gi], h, gi, gj);
+        // The normal is already here, so the slope the palette wants for its
+        // wear gradient is one subtraction rather than four more samples.
+        const c = palette.sample(this.surfaces[gj * n + gi], h, gi, gj, 1 - nrm.y);
         colors[o] = c[0];
         colors[o + 1] = c[1];
         colors[o + 2] = c[2];
@@ -411,36 +413,113 @@ export const SURFACE_IDS = { GRASS: 0, DIRT: 1, MUD: 2, CLIFF: 3, ICE: 4 };
 export const SURFACE_NAMES = ['GRASS', 'DIRT', 'MUD', 'GRASS', 'ICE'];
 
 /**
- * Terrain colours. Ground type picks the base; a little deterministic noise
- * picks between the theme's variants so the ground is mottled rather than
- * a single flat green.
+ * Terrain colours — the difference between ground and tinted noise.
+ *
+ * Four things are layered, in this order, and each one is answering a question
+ * the previous layer left open:
+ *
+ *  1. TURF. Two scales of value noise pick between the theme's three greens, so
+ *     grassland is mottled rather than a single flat colour.
+ *  2. WEAR. Grass does not grow on ground it cannot hold onto. As the land tips
+ *     past `GROUND_PAINT.wearStart` the turf thins to bare earth, and a noise
+ *     field pushes that line around so it is a ragged edge instead of a
+ *     contour. This is what puts brown on the hillsides and stops the world
+ *     reading as a green bedsheet thrown over some hills.
+ *  3. DAMP. Everything low is wet. From `dampAbove` metres over the water line
+ *     down to `dampBelow` under it, the ground darkens into mud — which also
+ *     means the streams and hollows read as *drainage* rather than as dents.
+ *  4. GRIT. A per-vertex speckle toward the theme's stone colour, weak in
+ *     grass and strong in bare earth, because soil is mostly small stones.
+ *
+ * All of it is baked into the mesh's colour attribute, which already exists, so
+ * the entire thing is free at runtime. The theme tint still multiplies over the
+ * top, so this survives a cross-fade to night the same as everything else.
  */
 function buildPalette(theme) {
   const toLinear = (hex) => {
     const c = new THREE.Color(hex);
     return [c.r, c.g, c.b];
   };
-  const base = toLinear(theme.ground.base);
-  const varA = toLinear(theme.ground.variantA);
-  const varB = toLinear(theme.ground.variantB);
-  const cliff = toLinear(theme.ground.cliff);
-  const mud = toLinear(theme.props.rock);
+  const G = theme.ground;
+  const base = toLinear(G.base);
+  const varA = toLinear(G.variantA);
+  const varB = toLinear(G.variantB);
+  const cliff = toLinear(G.cliff);
+  const dirt = toLinear(G.dirt);
+  const mud = toLinear(G.mud);
+  const grit = toLinear(G.grit);
+
+  const P = GROUND_PAINT;
+  const S = TERRAIN_SHAPE;
+  const wearFrom = P.wearStart;
+  const wearTo = P.wearFull;
+  const wearJitter = P.wearNoise;
+  const dampTop = S.waterLevel + P.dampAbove;
+  const dampBottom = S.waterLevel - P.dampBelow;
+  const out = [0, 0, 0];
 
   return {
-    sample(surfaceId, height, gi, gj) {
-      let c;
-      if (surfaceId === SURFACE_IDS.CLIFF) c = cliff;
-      else if (surfaceId === SURFACE_IDS.MUD) c = mud;
-      else {
-        // Two-scale mottling: broad patches plus per-vertex speckle.
-        const patch = valueNoise2(gi * 0.09, gj * 0.09) * 0.5 + 0.5;
-        const speck = valueNoise2(gi * 0.61, gj * 0.61) * 0.5 + 0.5;
-        const t = clamp01(patch * 0.75 + speck * 0.25);
-        c = t < 0.42 ? varA : t > 0.68 ? varB : base;
+    /**
+     * @param {number} surfaceId see SURFACE_IDS
+     * @param {number} height metres
+     * @param {number} gi global grid column
+     * @param {number} gj global grid row
+     * @param {number} slope 0..1, the same metric as `cliffSlope`
+     * @returns {number[]} linear rgb, reused between calls — copy it out
+     */
+    sample(surfaceId, height, gi, gj, slope) {
+      // 1. TURF
+      const patch = valueNoise2(gi * P.patchScale, gj * P.patchScale) * 0.5 + 0.5;
+      const speck = valueNoise2(gi * P.speckScale, gj * P.speckScale) * 0.5 + 0.5;
+      const t = clamp01(patch * 0.75 + speck * 0.25);
+      let c = t < 0.42 ? varA : t > 0.68 ? varB : base;
+
+      // 2. WEAR. A cliff is already bare, so it skips straight to rock.
+      let earth = 0;
+      if (surfaceId === SURFACE_IDS.CLIFF) {
+        out[0] = cliff[0];
+        out[1] = cliff[1];
+        out[2] = cliff[2];
+        earth = 1;
+      } else {
+        const ragged = valueNoise2(gi * P.wearNoiseScale, gj * P.wearNoiseScale) * wearJitter;
+        earth = smoothstep(wearFrom + ragged, wearTo + ragged, slope);
+        out[0] = lerp(c[0], dirt[0], earth);
+        out[1] = lerp(c[1], dirt[1], earth);
+        out[2] = lerp(c[2], dirt[2], earth);
       }
+
+      // 3. DAMP
+      const damp = 1 - smoothstep(dampBottom, dampTop, height);
+      if (damp > 0) {
+        out[0] = lerp(out[0], mud[0], damp);
+        out[1] = lerp(out[1], mud[1], damp);
+        out[2] = lerp(out[2], mud[2], damp);
+        earth = Math.max(earth, damp);
+      }
+
+      // 4. GRIT — pale stones where the noise is positive, dark flecks where it
+      // is negative. One-sided speckle reads as dust on the lens.
+      const g = valueNoise2(gi * P.gritScale, gj * P.gritScale);
+      const k = lerp(P.gritOnGrass, P.gritOnEarth, earth) * g;
+      if (k > 0) {
+        out[0] = lerp(out[0], grit[0], k);
+        out[1] = lerp(out[1], grit[1], k);
+        out[2] = lerp(out[2], grit[2], k);
+      } else {
+        const dark = 1 + k;
+        out[0] *= dark;
+        out[1] *= dark;
+        out[2] *= dark;
+      }
+
       // Higher ground catches more light; a free, cheap sense of relief.
-      const lift = 1 + clamp((height - 10) / 260, -0.1, 0.16);
-      return [c[0] * lift, c[1] * lift, c[2] * lift];
+      const L = P.lift;
+      const lift = 1 + clamp((height - L.from) / L.range, L.min, L.max);
+      out[0] *= lift;
+      out[1] *= lift;
+      out[2] *= lift;
+      return out;
     },
   };
 }

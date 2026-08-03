@@ -95,6 +95,11 @@ how to tune it and where to build the next act.
   cannot fight the PSX snap at `fog_vertex`. 2800 tufts, 29k triangles, zero
   allocation after `build()`.
 
+- **P18** — Dirt. `buildPalette` now layers turf → wear → damp → grit into the
+  terrain's vertex colours, with the colours per theme (`ground.dirt/mud/grit`)
+  and the rules in `GROUND_PAINT` (`style.js`). The wear thresholds are
+  ABSOLUTE, not fractions of `cliffSlope` — see bug 19.
+
 ## Bugs found so far (do not reintroduce)
 
 1. **Stability assist bypassed the grip ceiling.** It was applied after the yaw
@@ -168,6 +173,13 @@ how to tune it and where to build the next act.
     write and stayed drawn, sub-pixel, at a position hundreds of metres behind
     the player. Invisible, and still wrong. Snap the fade's two plateaus to
     exactly 0 and 1 so "hidden" is a state you can compare against.
+19. **`TERRAIN_SHAPE.cliffSlope` never fires.** The generated valley is far
+    gentler than it assumes: median slope 0.004, 90th percentile 0.056,
+    steepest vertex in the whole world 0.43, against a threshold of 0.55. Zero
+    vertices classify as `CLIFF` and 78 out of 48,841 as `DIRT`. Anything
+    expressed as a fraction of it — which is the natural thing to write — is
+    dead code that looks alive, and it is why the ground read as tinted noise
+    for so long. Measure the distribution before picking a slope threshold.
 
 ## Tooling note
 

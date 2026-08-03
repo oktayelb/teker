@@ -350,8 +350,15 @@ export const OPEN_WORLD = {
     fadeBand: 0.22,
     /** Do not bother rewriting an instance matrix for a smaller change. */
     fadeEpsilon: 0.02,
-    /** Nothing grows on a slope steeper than this (Terrain's 0..1 metric). */
-    maxSlope: 0.4,
+    /**
+     * Nothing grows on a slope steeper than this (Terrain's 0..1 metric).
+     *
+     * Matched to `GROUND_PAINT.wearFull` in `style.js`, which is the slope at
+     * which the terrain's own vertex colours have gone entirely to bare earth.
+     * Grass standing on ground that is painted as stripped soil is the kind of
+     * contradiction you notice without being able to say why.
+     */
+    maxSlope: 0.14,
     /** Terrain surfaces grass will root in. CLIFF is bare rock by definition. */
     surfaces: ['GRASS', 'DIRT'],
     /** Extra clearance beyond the road shoulder, metres. Verges stay bare. */

@@ -1411,6 +1411,109 @@ section('10. the wind is in the shader, and only in the grass');
 }
 
 // ---------------------------------------------------------------------------
+section('11. the ground looks like ground');
+
+// Terrain colour is baked into the mesh's vertex colours, which is the one
+// thing about the look that a headless run can read directly. So read it: pull
+// every vertex out of the built chunks and check the three claims the palette
+// makes — turf wears off as the land tips over, everything low goes dark and
+// damp, and there is grit in all of it.
+{
+  const { GROUND_PAINT } = await import('../src/config/style.js');
+  const { TERRAIN_SHAPE } = await import('../src/world/terrain.js');
+  const terrain = world.terrain;
+
+  for (const name of Object.keys(THEMES)) {
+    const g = resolveTheme(name).ground;
+    ok(
+      `theme "${name}" has earth to paint with`,
+      [g.dirt, g.mud, g.grit].every((c) => typeof c === 'number'),
+      `dirt ${g.dirt?.toString(16)} mud ${g.mud?.toString(16)} grit ${g.grit?.toString(16)}`
+    );
+  }
+
+  /** Greenness: how much a colour leans green against its own red and blue. */
+  const green = (r, gg, b) => gg - (r + b) / 2;
+  const luma = (r, gg, b) => 0.299 * r + 0.587 * gg + 0.114 * b;
+
+  const all = [];
+  for (const chunk of terrain.chunks) {
+    const pos = chunk.geometry.getAttribute('position');
+    const col = chunk.geometry.getAttribute('color');
+    for (let i = 0; i < pos.count; i += 11) {
+      const x = pos.getX(i);
+      const h = pos.getY(i);
+      const z = pos.getZ(i);
+      all.push({
+        slope: terrain.slopeAt(x, z),
+        h,
+        green: green(col.getX(i), col.getY(i), col.getZ(i)),
+        luma: luma(col.getX(i), col.getY(i), col.getZ(i)),
+      });
+    }
+  }
+  const mean = (rows, key) => rows.reduce((s, r) => s + r[key], 0) / Math.max(1, rows.length);
+
+  // Percentiles, not thresholds. This valley is far gentler than `cliffSlope`
+  // assumes — median slope 0.004, steepest vertex 0.43 — so "steep" has to mean
+  // "steep for this world" or the bucket comes back empty and the assertion
+  // passes without ever having looked at anything.
+  const bySlope = [...all].sort((a, b) => a.slope - b.slope);
+  const flat = bySlope.slice(0, Math.floor(bySlope.length * 0.5));
+  const steep = bySlope.slice(Math.floor(bySlope.length * 0.98));
+  ok('there is flat ground and steep ground to compare', flat.length > 200 && steep.length > 40,
+    `${flat.length} flat (to slope ${flat.at(-1).slope.toFixed(3)}), ${steep.length} steep (from ${steep[0].slope.toFixed(3)})`);
+  ok(
+    'turf wears off as the land tips over',
+    mean(steep, 'green') < mean(flat, 'green') * 0.6,
+    `greenness ${mean(flat, 'green').toFixed(4)} flat vs ${mean(steep, 'green').toFixed(4)} steep`
+  );
+
+  const low = all.filter((r) => r.h < TERRAIN_SHAPE.waterLevel - GROUND_PAINT.dampBelow);
+  const high = all.filter((r) => r.h > TERRAIN_SHAPE.waterLevel + GROUND_PAINT.dampAbove + 30);
+  ok('there is low ground and high ground to compare', low.length > 20 && high.length > 200,
+    `${low.length} low, ${high.length} high`);
+  ok(
+    'the low ground is dark and damp',
+    mean(low, 'luma') < mean(high, 'luma') * 0.75,
+    `luma ${mean(high, 'luma').toFixed(4)} high vs ${mean(low, 'luma').toFixed(4)} low`
+  );
+
+  // Variation. A palette that has stopped mottling still passes every average
+  // above, because the average is all it produces.
+  const mu = mean(all, 'luma');
+  const sd = Math.sqrt(all.reduce((s, r) => s + (r.luma - mu) ** 2, 0) / all.length);
+  ok('the ground is not one flat colour', sd / mu > 0.12, `luma spread ${(100 * sd / mu).toFixed(1)}%`);
+
+  // COLOURS COME FROM THE THEME, NOT FROM THIS FILE. Paint a slope that is
+  // steep enough and high enough to be nothing but bare earth, twice, with the
+  // theme's dirt colour swapped underneath. A hard-coded brown would not move.
+  {
+    const { Terrain } = await import('../src/world/terrain.js');
+    const mk = (dirtHex) => {
+      const t = JSON.parse(JSON.stringify(resolveTheme('forest')));
+      t.ground.dirt = dirtHex;
+      const terr = new Terrain({ resolution: 8, cellSize: 13, seed: 7 }).generate();
+      // A uniform 40-degree ramp, well above the water line.
+      for (let j = 0; j < terr.gridSize; j++) {
+        for (let i = 0; i < terr.gridSize; i++) terr.heights[j * terr.gridSize + i] = 40 + i * 11;
+      }
+      terr._classifySurfaces();
+      terr.buildMesh(materials, t, 8);
+      const col = terr.chunks[0].geometry.getAttribute('color');
+      return [col.getX(12), col.getY(12), col.getZ(12)];
+    };
+    const brown = mk(0x6b5537);
+    const magenta = mk(0xff00ff);
+    ok(
+      "the earth is the theme's earth",
+      Math.abs(brown[0] - magenta[0]) > 0.05 && Math.abs(brown[2] - magenta[2]) > 0.05,
+      `${brown.map((v) => v.toFixed(3)).join(',')} vs ${magenta.map((v) => v.toFixed(3)).join(',')}`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 console.log(
   `\n${failures === 0 ? '\x1b[32m' : '\x1b[31m'}${checks - failures}/${checks} checks passed\x1b[0m\n`
 );
