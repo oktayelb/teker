@@ -20,6 +20,12 @@ export const BINDINGS = {
   cycleCamera: ['KeyC'],
   respawn: ['KeyR'],
   horn: ['KeyH'],
+  /**
+   * Headlights. Not a driving input — it never touches `InputState`, because
+   * the car's lights are the car's state, not this frame's intent. `Game`
+   * reads the raw key event and flips the chassis. See `Game#_wireGlobalKeys`.
+   */
+  headlights: ['KeyF'],
   pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'NumpadEnter'],
   skip: ['Enter', 'Space'],

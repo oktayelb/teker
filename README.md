@@ -49,8 +49,15 @@ download.
 
 ### Keys
 
-`W A S D` / arrows drive · `Space` handbrake · `C` cycle camera · `V` look behind
-· `R` respawn (races only) · `H` horn · `` ` `` tuning panel · `Esc` pause + options
+`W A S D` / arrows drive · `Space` handbrake · `F` headlights · `C` cycle camera
+· `V` look behind · `R` respawn (races only) · `H` horn · `` ` `` tuning panel
+· `Esc` pause + options
+
+`Space` + `W` held together shrugs off a felled tree you are wearing.
+
+`F` is not only a light switch. A lit car is visible from half again as far
+(`PATROL.headlightRange`), so running dark past a patrol is a real option and a
+genuinely difficult one — the forest at night is not drivable blind.
 
 ---
 

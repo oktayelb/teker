@@ -19,18 +19,26 @@
  *
  * `mercyAfter` guarantees the player wins eventually. The chase is a scene, not
  * a skill check; it has somewhere it needs to get to.
+ *
+ * IT IS ALSO THE ONLY CHASE
+ * -------------------------
+ * The open-world patrols (`src/game/patrol.js`) do not implement pursuit. When
+ * one of them sees the player it hands its cruiser to `start({ adopt: [car] })`
+ * and stops existing. Everything after that — heat, search, escape, mercy — is
+ * this file, unchanged, so an encounter that began three hours into free roam
+ * ends the same way the scripted one does. Sight is decided in
+ * `src/game/perception.js`, shared for the same reason.
  */
 
 import * as THREE from 'three';
 import { AiDriver } from '../vehicle/ai.js';
 import { events } from '../core/events.js';
-import { CHASE, TREES } from '../config/gameplay.js';
-import { clamp, clamp01, lerp, shortestAngle } from '../core/mathx.js';
+import { canSee } from './perception.js';
+import { CHASE } from '../config/gameplay.js';
+import { clamp, clamp01 } from '../core/mathx.js';
 
 const _toPlayer = new THREE.Vector3();
 const _spawn = new THREE.Vector3();
-
-const VISION_COS = Math.cos((CHASE.visionConeDeg * Math.PI) / 180);
 
 export class ChaseSystem {
   /**
@@ -63,49 +71,44 @@ export class ChaseSystem {
    * @param {object} [opts]
    * @param {number} [opts.count]
    * @param {number} [opts.distance] how far behind to spawn them
+   * @param {import('../vehicle/vehicle.js').Vehicle[]} [opts.adopt]
+   *   Cars that already exist and are already here. A patrol that has just seen
+   *   the player hands its cruiser over this way (`src/game/patrol.js`) instead
+   *   of the chase spawning a second one — the car that spotted you has to be
+   *   the car that comes after you, or the player watches their pursuer blink
+   *   into existence next to the one that was actually looking at them.
    */
-  start({ count = CHASE.copCount, distance = CHASE.spawnDistance } = {}) {
+  start({ count = CHASE.copCount, distance = CHASE.spawnDistance, adopt = null } = {}) {
     if (this.active) return;
     const g = this.game;
     const t = this.target;
 
-    // Spawn behind the player's *velocity*, not their nose, so they arrive from
-    // where the player has just been rather than materialising in front.
-    const backX = t.speed > 3 ? -t.velocity.x / t.speed : -Math.sin(t.heading);
-    const backZ = t.speed > 3 ? -t.velocity.z / t.speed : -Math.cos(t.heading);
+    if (adopt && adopt.length) {
+      for (let i = 0; i < adopt.length; i++) {
+        this._enlist(adopt[i], i, adopt[i].position.distanceTo(t.position));
+      }
+    } else {
+      // Spawn behind the player's *velocity*, not their nose, so they arrive from
+      // where the player has just been rather than materialising in front.
+      const backX = t.speed > 3 ? -t.velocity.x / t.speed : -Math.sin(t.heading);
+      const backZ = t.speed > 3 ? -t.velocity.z / t.speed : -Math.cos(t.heading);
 
-    for (let i = 0; i < count; i++) {
-      const spread = (i - (count - 1) / 2) * CHASE.spawnSpread;
-      const x = t.position.x + backX * distance - backZ * spread;
-      const z = t.position.z + backZ * distance + backX * spread;
-      const ground = g.world.sampleGround(x, z);
-      _spawn.set(x, ground.height + 1, z);
+      for (let i = 0; i < count; i++) {
+        const spread = (i - (count - 1) / 2) * CHASE.spawnSpread;
+        const x = t.position.x + backX * distance - backZ * spread;
+        const z = t.position.z + backZ * distance + backX * spread;
+        const ground = g.world.sampleGround(x, z);
+        _spawn.set(x, ground.height + 1, z);
 
-      const cop = g.spawnVehicle({
-        profile: 'cruiser',
-        kind: 'cop',
-        color: g.theme.vehicles.cop,
-        id: `cop${i}`,
-      });
-      cop.reset(_spawn, Math.atan2(-backX, -backZ));
-      cop.chassis.setSiren(true);
-      // Headlights on: two sets of beams sweeping the trees behind you is most
-      // of what makes the chase read at night.
-      cop.chassis.setHeadlights(true);
-
-      const ai = new AiDriver(cop, {
-        skill: 0.85,
-        aggression: 0.9,
-        seed: 4000 + i,
-        world: g.world,
-      });
-      ai.pursue(t);
-
-      const entry = { vehicle: cop, ai, id: `cop${i}`, sees: false, ramCooldown: 0 };
-      g.setDriver(cop, (_, dt) => this._driveCop(entry, dt));
-      this.cops.push(entry);
-
-      g.audio.startSiren(entry.id, { distance, pan: 0 });
+        const cop = g.spawnVehicle({
+          profile: 'cruiser',
+          kind: 'cop',
+          color: g.theme.vehicles.cop,
+          id: `cop${i}`,
+        });
+        cop.reset(_spawn, Math.atan2(-backX, -backZ));
+        this._enlist(cop, i, distance);
+      }
     }
 
     this.state = 'pursuing';
@@ -116,7 +119,40 @@ export class ChaseSystem {
     this._lastSeen.copy(t.position);
 
     g.audio.setMusic('chase');
-    events.emit('chase:started', { count });
+    // The pursuit meter is the HUD's third personality and it only exists while
+    // this is running. Without the swap the meter is fed a number every frame
+    // and never drawn — `ui.css` hides it in the open world on purpose.
+    g.ui.hud.setMode('chase');
+    events.emit('chase:started', { count: this.cops.length });
+  }
+
+  /**
+   * Turn a cruiser into a pursuer. The single place that decides what a cop in
+   * a chase *is*, whether it was spawned for the job or was already out here.
+   * @param {import('../vehicle/vehicle.js').Vehicle} cop
+   * @param {number} index
+   * @param {number} distance metres from the player, for the initial siren mix
+   */
+  _enlist(cop, index, distance) {
+    const g = this.game;
+    const id = `cop${index}`;
+    cop.chassis.setSiren(true);
+    // Headlights on: beams sweeping the trees behind you is most of what makes
+    // the chase read at night.
+    cop.chassis.setHeadlights(true);
+
+    const ai = new AiDriver(cop, {
+      skill: 0.85,
+      aggression: 0.9,
+      seed: 4000 + index,
+      world: g.world,
+    });
+    ai.pursue(this.target);
+
+    const entry = { vehicle: cop, ai, id, sees: false, ramCooldown: 0 };
+    g.setDriver(cop, (_, dt) => this._driveCop(entry, dt));
+    this.cops.push(entry);
+    g.audio.startSiren(id, { distance, pan: 0 });
   }
 
   stop() {
@@ -129,6 +165,7 @@ export class ChaseSystem {
     this.state = 'inactive';
     this.heat = 0;
     g.ui.hud.setHeat(null);
+    g.ui.hud.setMode('openWorld');
   }
 
   /** Cops peel off and leave rather than blinking out of existence. */
@@ -140,7 +177,11 @@ export class ChaseSystem {
     }
     // Headlights stay on as they drive away — that is the last you see of them.
     this.state = 'escaped';
+    this.heat = 0;
     this.game.audio.setMusic('alone');
+    // The meter goes with them, and so does the HUD it was living in.
+    this.game.ui.hud.setHeat(null);
+    this.game.ui.hud.setMode('openWorld');
     events.emit('chase:escaped', { duration: this.elapsed });
 
     // Let them coast out of sight, then remove them.
@@ -239,33 +280,16 @@ export class ChaseSystem {
 
   // -- perception -----------------------------------------------------------
 
+  /**
+   * Shared with the open-world patrols, which is the whole reason it moved out
+   * of this file. See `src/game/perception.js`; the defaults it uses are the
+   * `CHASE.vision*` numbers, so this behaves exactly as it always did.
+   *
+   * No headlight modifier here, deliberately: these two were *dispatched* to
+   * your last known position. They are not finding you by looking for a glow.
+   */
   _canSee(cop) {
-    const t = this.target;
-
-    // A tree came down on the car and stayed there. Sitting still under it, you
-    // are a fallen pine and they drive past. Moving, you are a fallen pine doing
-    // 60 km/h, which is worse than no disguise at all — so this only holds while
-    // the car is barely rolling. `TREES.disguiseSpeed` is that line.
-    if (t.disguised && t.speed < TREES.disguiseSpeed) return false;
-
-    const dx = t.position.x - cop.position.x;
-    const dz = t.position.z - cop.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist > CHASE.visionRange) return false;
-
-    // Cone: are you in front of them?
-    const invD = 1 / (dist || 1);
-    const dot = (dx * invD) * Math.sin(cop.heading) + (dz * invD) * Math.cos(cop.heading);
-    if (dot < VISION_COS) return false;
-
-    // Occlusion: trees and rock actually hide you.
-    if (CHASE.occlusionCheck && dist > 12) {
-      const blocked = this.game.world.collision.raycastBlocked(
-        cop.position.x, cop.position.z, t.position.x, t.position.z
-      );
-      if (blocked) return false;
-    }
-    return true;
+    return canSee(cop, this.target, this.game.world);
   }
 
   // -- driving --------------------------------------------------------------
