@@ -82,6 +82,19 @@ export const BEATS = {
     { subtitle: { text: 'Neither was the edge of the world.', duration: 3.4 } },
   ],
 
+  // -- the glass ------------------------------------------------------------
+  /**
+   * Played once, the first time a dome closes behind the player — which is the
+   * first time anybody has been in a position to see one. The third line is
+   * doing a job as well as a mood: it is how the player learns the roof is
+   * drivable, without a prompt telling them so.
+   */
+  'dome.reveal': [
+    { subtitle: { text: 'The parkur is under glass.', duration: 3.0 } },
+    { subtitle: { text: 'It always was. You were being raced inside a case.', duration: 3.6 } },
+    { subtitle: { text: 'And the lid of it holds your weight.', duration: 3.4 } },
+  ],
+
   // -- wandering ------------------------------------------------------------
   /** Ambient lines, played at intervals while the player explores. */
   'wander.1': { subtitle: { text: 'The trees keep going.', duration: 2.8 } },
@@ -156,6 +169,37 @@ export const INTRO_TIMING = {
   glitchRelease: 2.2,
   /** Delay before the first "you are free" line, so the player drives first. */
   freeLineDelay: 4.0,
+  /**
+   * THE DOME REVEAL. Staged the moment the glass closes behind the player.
+   *
+   * The camera leaves the car and parks outside the dome looking back at it,
+   * because the shot is the point: from behind the wheel a dome is a curve of
+   * light overhead and nothing else, and the player has to see the *shape* of
+   * the thing they were inside. Everything is held while it happens — the same
+   * treatment the failed reset gets, and for the same reason.
+   */
+  domeHold: 6.0,
+  domeSlowMo: 0.4,
+  /**
+   * Camera stand-off from the car: metres further out from the dome, and up.
+   *
+   * Both numbers are fighting the same thing. A dome is three hundred metres
+   * across and twenty metres tall where the player is standing, so from close
+   * to the rim it is a line across the screen and nothing else. The camera has
+   * to get back and up far enough for the *curve* to be in frame — that is the
+   * whole shot — while leaving the car in it as something to be small next to.
+   */
+  domeCameraBack: 150,
+  domeCameraUp: 78,
+  /**
+   * Where the shot is aimed, from the car (0) to the dome's apex (1). Short of
+   * the apex on purpose: it drops the car into the bottom of frame with its
+   * headlights on, and the dome only means anything if there is something the
+   * size of a car in shot to mean it against.
+   */
+  domeLookBlend: 0.8,
+  /** Degrees of lens pushed in over the hold. Negative narrows the field. */
+  domeZoom: -17,
   /** Ambient wander lines fire on this cadence, if the player is still moving. */
   wanderInterval: 11,
   /** After the chase ends, how long before the closing lines. */

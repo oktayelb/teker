@@ -162,6 +162,13 @@ export const THEMES = {
       rustDark: 0x5c3320,
     },
     /**
+     * The glass over the parkours. `glass` is the pane, which is fogged and
+     * almost transparent; `seam` is the panel edge, which is emissive and
+     * ignores fog, so a dome three hundred metres away still reads as a
+     * structure on a night you cannot see a hundred. See `src/world/dome.js`.
+     */
+    dome: { glass: 0xa8d0dc, seam: 0x8fe0d0 },
+    /**
      * Fur and wings. Every theme inherits these from `forest`, so the open
      * world is populated in all of them without four copies of the palette.
      */
@@ -269,6 +276,8 @@ export const THEMES = {
       litter: 0x2a2216,
     },
     ui: { ink: 0xdfe6f0, accent: 0xff2a2a, accentAlt: 0x2a6aff },
+    /** Cold glass under a cold sky. The seam stays bright; it has to. */
+    dome: { glass: 0x5f7a92, seam: 0x8fe0d0 },
     grade: { lift: 0.035, gain: 1.2, saturation: 0.78, tint: 0xb8c6e0 },
   },
 

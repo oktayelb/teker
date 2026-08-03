@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { applyPsx, setPsxSnap } from './psx.js';
 import { applyVertexWind } from './wind.js';
+import { applyGlassFresnel } from './glass.js';
 
 /** Roles that exist in every theme, and where their representative colour lives. */
 const ROLE_TINT_SOURCE = {
@@ -24,8 +25,12 @@ const ROLE_TINT_SOURCE = {
   prop: ['props', 'rock'],
   barrier: ['props', 'barrier'],
   water: ['props', 'water'],
+  domeGlass: ['dome', 'glass'],
   carBody: null, // per-instance colour, never tinted by theme
   unlit: null,
+  // `domeSeam` is deliberately absent: the seams are the one thing in the world
+  // that must read identically in every theme, because they are the only part
+  // of a dome you can see from far enough away to understand what it is.
 };
 
 function readPath(obj, path) {
@@ -128,6 +133,34 @@ export class MaterialLibrary {
 
       case 'water':
         return this._lit({ transparent: true, opacity: 0.82 });
+
+      case 'domeGlass':
+        // The panes. Double-sided because you look at a dome from underneath
+        // for the whole first half of the game and from on top afterwards, and
+        // `depthWrite: false` because a dome is a single convex shell that
+        // cannot be sorted against itself — writing depth makes the far half
+        // punch holes in the near half. `opacity` is owned by the caller; see
+        // `DOME.glassOpacity`. The Fresnel is what stops a low opacity reading
+        // as nothing at all when you are stood on it — see `render/glass.js`.
+        return applyGlassFresnel(
+          this._lit({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.13,
+            depthWrite: false,
+          })
+        );
+
+      case 'domeSeam':
+        // Panel edges, drawn as lines. Unfogged on purpose — the reveal happens
+        // at night, three hundred metres out, in fog that eats everything else.
+        return new THREE.LineBasicMaterial({
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.55,
+          depthWrite: false,
+          fog: false,
+        });
 
       case 'carBody':
         return this._lit();

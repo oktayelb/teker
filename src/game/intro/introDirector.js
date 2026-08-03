@@ -51,6 +51,9 @@ export class IntroDirector {
     this._chase = null;
     this._everHidden = false;
     this._trackFoundAt = -Infinity;
+    /** The dome reveal is once, ever. True while it is on screen. */
+    this._domeShotPlayed = false;
+    this._domeShotRunning = false;
     /** Set to a title-menu id to skip the menu entirely (see `?start=`). */
     this.startAt = null;
   }
@@ -72,6 +75,8 @@ export class IntroDirector {
       .on('race:offCourse', (p) => this._onOffCourse(p))
       .on('chase:escaped', () => this._onChaseEscaped())
       .on('chase:lost', () => this._onChaseLost())
+      // The world reveals its own domes; the director only stages the shot.
+      .on('world:domesRevealed', (p) => this._onDomesRevealed(p))
       .on('world:landmark', (p) => this._onLandmark(p));
 
     return this;
@@ -383,11 +388,85 @@ export class IntroDirector {
       }
     }
 
-    // The thirty seconds.
+    // The thirty seconds. Not while the camera is off the car looking at a
+    // dome — two scripted moments over the top of each other is neither.
+    if (this._domeShotRunning) return;
     if (!this._sirenArmed && this._freeTime >= OPEN_WORLD.sirenDelay && !g.boot.noCops) {
       this._sirenArmed = true;
       this._startSirens();
     }
+  }
+
+  /**
+   * THE GLASS. Fired by the world the instant a dome closes behind the player;
+   * see `DomeField#sync`. The domes are already visible by the time this runs —
+   * that is the world's business, not the story's — so everything here is
+   * presentation, and skipping all of it costs nothing but the shot.
+   *
+   * @param {{trackId: string|null, dome: object|null}} p
+   */
+  async _onDomesRevealed(p) {
+    if (this._domeShotPlayed) return;
+    this._domeShotPlayed = true;
+    const g = this.game;
+    const player = g.player;
+    const dome = p?.dome;
+
+    // Mid-chase, or after the director has stopped mattering, the domes just
+    // appear. Taking the camera off a player who is being pursued is worse than
+    // saying nothing at all.
+    if (this.phase !== 'free' || !player || !dome) {
+      this._play('dome.reveal');
+      return;
+    }
+
+    // Stand off along the line the player came out on, so the car is in shot
+    // with the whole dome behind it.
+    const outX = player.position.x - dome.centerX;
+    const outZ = player.position.z - dome.centerZ;
+    const len = Math.hypot(outX, outZ) || 1;
+    const eye = new THREE.Vector3(
+      player.position.x + (outX / len) * T.domeCameraBack,
+      player.position.y + T.domeCameraUp,
+      player.position.z + (outZ / len) * T.domeCameraBack
+    );
+
+    const aim = new THREE.Vector3().lerpVectors(player.position, dome.apex, T.domeLookBlend);
+
+    const rig = g.camera.rigName;
+    this._domeShotRunning = true;
+    g.loop.effectTimeScale = T.domeSlowMo;
+    g.input.setLocked(true);
+    g.camera.setStatic(eye, aim);
+    this._play('dome.reveal');
+
+    // The push-in. Slow, and over the whole hold — a snap zoom would read as a
+    // cut, and the shot is meant to feel like being made to look.
+    await this._rampFov(0, T.domeZoom, T.domeHold);
+
+    g.camera.fovBias = 0;
+    g.camera.clearStatic();
+    g.camera.setRig(rig, true);
+    g.loop.effectTimeScale = 1;
+    g.input.setLocked(false);
+    this._domeShotRunning = false;
+  }
+
+  /** Ease the camera's lens offset. Real time, like `_rampGlitch`. */
+  _rampFov(from, to, seconds) {
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const tick = () => {
+        if (!this.attached) return resolve();
+        const t = clamp01((performance.now() - start) / (seconds * 1000));
+        // Ease out, so most of the movement is at the front and the shot
+        // settles rather than arriving.
+        this.game.camera.fovBias = lerp(from, to, 1 - (1 - t) * (1 - t));
+        if (t < 1) requestAnimationFrame(tick);
+        else resolve();
+      };
+      tick();
+    });
   }
 
   _onLandmark(p) {
@@ -470,6 +549,9 @@ export class IntroDirector {
       g.audio.setAmbience('outside');
       await g.modes.switchTo('openWorld', { keepPlayer: false, rig: 'chaseWide' });
       g.flags.escaped = true;
+      // Nobody is going to narrate the glass on a boot that skipped the story,
+      // so it is simply already there. `?skip=intro` does the same in main.js.
+      g.world.revealDomes();
     }
     g.ui.hud.setMode('openWorld');
     this.detach();

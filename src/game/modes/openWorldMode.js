@@ -74,6 +74,12 @@ export class OpenWorldMode extends Mode {
     else this._despawnNonPlayers();
 
     g.world.setActiveTrack(null);
+    // The glass starts mattering here, and only here. Entering the open world
+    // is the moment the game stops pretending, whether the player got here
+    // through the story, through `?skip=intro`, or through `?scene=open` — so
+    // this is the one place that has to know. The domes stay invisible until
+    // the player actually comes out from under one. See `src/world/dome.js`.
+    g.world.armDomes();
     g.ui.hud.setMode('openWorld');
     g.ui.hud.setLap({ lap: 0, total: 0 });
     g.ui.hud.setPosition({ place: 0, total: 0 });

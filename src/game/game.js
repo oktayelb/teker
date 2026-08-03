@@ -276,7 +276,9 @@ export class Game {
     this.time += dt;
     const inputState = this.input.update(dt);
     this.renderer.update(dt);
-    this.world?.update(dt, this.time, this.renderer.camera.position);
+    // The vehicle list goes with it because the domes keep a per-car latch —
+    // which glass has closed behind whom. See `src/world/dome.js`.
+    this.world?.update(dt, this.time, this.renderer.camera.position, this.vehicles);
     this.modes.update(dt);
     this.camera.update(dt, inputState);
     // The UI runs on real time so it keeps animating through pause and slow-mo.
@@ -362,7 +364,7 @@ export class Game {
     if (!this.world) return;
     for (const v of this.vehicles) {
       if (v.position.y > v.groundHeight - PLAYER.fallRescueDepth) continue;
-      const p = this.world.safePlaceNear(v.position.x, v.position.z);
+      const p = this.world.safePlaceNear(v.position.x, v.position.z, v);
       v.reset(p, v.heading);
       events.emit('vehicle:rescued', { id: v.id });
     }

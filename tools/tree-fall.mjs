@@ -53,14 +53,30 @@ try {
     for (const ev of ['tree:damaged', 'tree:felled', 'vehicle:disguised', 'vehicle:undisguised'])
       TEKER.events.on(ev, (p) => window.__log.push(`${ev}:${p.kind ?? ''}`));
 
-    /** Find a fellable tree the player can be aimed at. */
+    /**
+     * Find a fellable tree the player can be aimed at.
+     *
+     * "Can be aimed at" now excludes anything under a dome the player is sealed
+     * against. Free roam spawns you on parkur 3's grid, which means parkurs 1
+     * and 2 have already closed over their forests — put the car down in there
+     * and it is placed on the *roof*, sixty metres above the trunk it was
+     * supposed to hit, and every ram silently misses. See `src/world/dome.js`.
+     */
     window.__pickTree = () => {
+      const domes = g.world.domes;
+      const reachable = (c) => {
+        if (!domes) return true;
+        for (const d of domes.domes) {
+          if (domes.sealedFor(g.player, d) && d.distanceTo(c.x, c.z) <= d.radius) return false;
+        }
+        return true;
+      };
       const seen = new Set();
       for (const list of g.world.collision.cells.values()) {
         for (const c of list) {
           if (seen.has(c) || c.felled) continue;
           seen.add(c);
-          if (['pine', 'broadleaf', 'dead'].includes(c.kind) && c.mesh) return c;
+          if (['pine', 'broadleaf', 'dead'].includes(c.kind) && c.mesh && reachable(c)) return c;
         }
       }
       return null;

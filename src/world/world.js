@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { Terrain } from './terrain.js';
 import { Track, ROAD } from './track.js';
+import { DomeField } from './dome.js';
 import { Scatter } from './scatter.js';
 import { CollisionGrid } from './collision.js';
 import { TrackLighting } from './lighting.js';
@@ -78,6 +79,12 @@ export class World {
     /** @type {Track|null} the ribbon the current mode cares about */
     this.activeTrack = null;
     this.collision = new CollisionGrid(12);
+    /**
+     * The glass over the parkours. Built with the world, invisible and inert
+     * until the game stops pretending. See `src/world/dome.js`.
+     * @type {DomeField|null}
+     */
+    this.domes = null;
     this.scatter = null;
     /** Animals, pooled around the camera. See wildlife.js. */
     this.wildlife = null;
@@ -176,6 +183,13 @@ export class World {
           this.lighting.set(t.id, new TrackLighting({ track: t, pool: this.lightPool, group: g }));
         }
       }
+    });
+
+    // The glass. Built now, with the tracks it belongs to and the terrain it is
+    // anchored to, and then nothing happens to it for the whole of the story.
+    await step('domes', 0.68, () => {
+      this.domes = new DomeField({ tracks: this._trackList, terrain: this.terrain });
+      this.root.add(this.domes.build(this.materials, this.theme));
     });
 
     if (scatter) {
@@ -294,12 +308,21 @@ export class World {
     // Keep props off the racing surface and its run-off, but let them creep
     // right up to the edge — the forest should feel like it is pressing in.
     const avoidTracks = this._trackAvoidance(3.5);
+    // Trees, and only trees, also keep off the ring where the glass comes down
+    // to meet the earth: a band forty-odd metres wide at each dome's rim, and
+    // nowhere else. Under the middle of a dome the roof is sixty metres up and
+    // the forest is untouched. Without this the rim runs a pane through every
+    // trunk it passes; with it, the rim sits in a cleared ring, which is what
+    // seating a dome in a forest would actually take. Rocks and bushes are
+    // waist-high and stay, so the ring reads as cleared rather than as sterile.
+    const skewered = this.domes ? this.domes.skewerAvoidance(this.terrain) : () => false;
+    const avoidTrees = (x, z) => avoidTracks(x, z) || skewered(x, z);
 
     const D = OPEN_WORLD.scatterDensity;
     const span = this.terrain.halfSpan;
-    s.place({ kind: 'pine', count: Math.round(D.trees * 0.62), region: { radius: span * 0.97 }, avoid: avoidTracks });
-    s.place({ kind: 'broadleaf', count: Math.round(D.trees * 0.28), region: { radius: span * 0.9 }, avoid: avoidTracks });
-    s.place({ kind: 'dead', count: Math.round(D.trees * 0.1), region: { inner: span * 0.3, radius: span * 0.97 }, avoid: avoidTracks });
+    s.place({ kind: 'pine', count: Math.round(D.trees * 0.62), region: { radius: span * 0.97 }, avoid: avoidTrees });
+    s.place({ kind: 'broadleaf', count: Math.round(D.trees * 0.28), region: { radius: span * 0.9 }, avoid: avoidTrees });
+    s.place({ kind: 'dead', count: Math.round(D.trees * 0.1), region: { inner: span * 0.3, radius: span * 0.97 }, avoid: avoidTrees });
     s.place({ kind: 'rock', count: D.rocks, region: { radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'bush', count: D.bushes, region: { radius: span * 0.95 }, avoid: avoidTracks });
     // THE UNDERSTOREY, placed after the canopy it belongs under and *because*
@@ -399,9 +422,18 @@ export class World {
 
   /**
    * The ground under a world position.
+   *
+   * `agent` is the car (or camera target) asking. It exists for one reason: a
+   * dome is only ground for something that has been outside it, so "what is the
+   * ground here" genuinely has a different answer for the player on top of the
+   * glass and the three rivals still lapping underneath it. Pass nothing and
+   * you get the world without any glass in it, which is what every caller that
+   * does not belong to a specific car wants.
+   *
+   * @param {{position: THREE.Vector3}} [agent]
    * @returns {{height:number, normal:THREE.Vector3, surface:string}}
    */
-  sampleGround(x, z) {
+  sampleGround(x, z, agent = null) {
     const terrainH = this.terrain.heightAt(x, z);
     let height = terrainH;
     let surface = this.terrain.surfaceAt(x, z);
@@ -435,6 +467,21 @@ export class World {
     }
 
     this.terrain.normalAt(x, z, _normal);
+
+    // The glass wins wherever it is above the earth. Highest-wins rather than a
+    // replacement is what makes the rim seamless: the shell is sunk into the
+    // ground out there (see DOME.groundBite), so driving onto a dome is the
+    // ground quietly stopping being the ground, with no step to hit.
+    const dome = this.domes?.domeAt(x, z, agent);
+    if (dome) {
+      const glass = dome.heightAt(x, z);
+      if (glass > height) {
+        height = glass;
+        surface = 'GLASS';
+        dome.normalAt(x, z, _normal);
+      }
+    }
+
     return { height, normal: _normal, surface };
   }
 
@@ -443,10 +490,13 @@ export class World {
    * care about the surface or the normal — see `Vehicle#_sampleGround`, which
    * probes the ground fore and aft of the car so the nose stops burying itself
    * in hillsides. Skipping `normalAt` alone saves four heightfield samples.
+   * @param {{position: THREE.Vector3}} [agent] see `sampleGround`
    * @returns {number} metres
    */
-  groundHeightAt(x, z) {
+  groundHeightAt(x, z, agent = null) {
+    const glass = this.domes ? this.domes.heightAt(x, z, agent) : -Infinity;
     const terrainH = this.terrain.heightAt(x, z);
+    let height = terrainH;
     for (const t of this._trackList) {
       const q = t.query(x, z, this._query);
       if (!q) continue;
@@ -454,9 +504,10 @@ export class World {
       const reach = Math.max(inner, q.halfWidth + q.runoff);
       if (q.dist > reach + 9) continue;
       const w = 1 - smoothstep(inner, inner + 9, q.dist);
-      return lerp(terrainH, q.height + ROAD.roadLift, w);
+      height = lerp(terrainH, q.height + ROAD.roadLift, w);
+      break;
     }
-    return terrainH;
+    return glass > height ? glass : height;
   }
 
   /** @see CollisionGrid#resolve */
@@ -511,6 +562,23 @@ export class World {
     if (mesh) mesh.visible = enabled;
   }
 
+  /**
+   * Start the glass watching. Until this is called the domes are drawn by
+   * nobody, collided with by nobody, and cost one branch per ground query.
+   *
+   * `OpenWorldMode` calls it on entry, which is deliberately the *only* caller:
+   * the open world is the moment the game stops pretending, whichever way the
+   * player reached it.
+   */
+  armDomes() {
+    this.domes?.arm();
+  }
+
+  /** @see DomeField#reveal — for a boot that skips straight past the reveal. */
+  revealDomes() {
+    return this.domes?.reveal() ?? false;
+  }
+
   /** Nearest landmark within its own radius, or null. */
   landmarkAt(x, z) {
     for (const l of this.landmarks) {
@@ -519,13 +587,29 @@ export class World {
     return null;
   }
 
-  /** Somewhere sensible to put a car that has fallen out of the world. */
-  safePlaceNear(x, z) {
-    const h = this.terrain.heightAt(x, z);
+  /**
+   * Somewhere sensible to put a car that has fallen out of the world.
+   *
+   * `agent` matters here for the same reason it does in `sampleGround`, and the
+   * consequence of leaving it out is worse: a car sealed against a dome, put
+   * back on the *terrain* underneath that dome, is instantly below its own
+   * ground again — so it is rescued again, and again, and never moves. Placing
+   * it on whatever surface it is actually entitled to stand on is the fix.
+   */
+  safePlaceNear(x, z, agent = null) {
+    const h = this.groundHeightAt(x, z, agent);
     return new THREE.Vector3(x, h + 1.5, z);
   }
 
-  update(dt, time, cameraPosition = null) {
+  /**
+   * @param {object[]} [vehicles] everything the domes have to keep a latch for.
+   *   Passed in rather than held, because the world does not own the cars.
+   */
+  update(dt, time, cameraPosition = null, vehicles = null) {
+    // Before anything reads the ground this frame: has anyone come out from
+    // under a dome since the last one?
+    this.domes?.sync(vehicles);
+    this.domes?.update(dt);
     this.wildlife?.update(dt, cameraPosition);
     // Grass follows the camera and blows in the wind. Both live in here.
     this.groundCover?.update(dt, cameraPosition);
@@ -548,6 +632,7 @@ export class World {
     for (const rig of this.lighting.values()) rig.dispose();
     this.lighting.clear();
     this.terrain?.dispose();
+    this.domes?.dispose();
     this.wildlife?.dispose();
     this.groundCover?.dispose();
     this.trees.dispose();

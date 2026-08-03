@@ -97,7 +97,11 @@ export class ChaseSystem {
         const spread = (i - (count - 1) / 2) * CHASE.spawnSpread;
         const x = t.position.x + backX * distance - backZ * spread;
         const z = t.position.z + backZ * distance + backX * spread;
-        const ground = g.world.sampleGround(x, z);
+        // Sampled AS THE TARGET, so the cruisers arrive on whatever the player
+        // is standing on. Drive up onto a dome and they come up after you; ask
+        // for the plain terrain here and they spawn under sixty metres of glass
+        // and pursue you through a roof.
+        const ground = g.world.sampleGround(x, z, t);
         _spawn.set(x, ground.height + 1, z);
 
         const cop = g.spawnVehicle({

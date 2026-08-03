@@ -86,6 +86,121 @@ export const BREAKOUT = {
 };
 
 // ---------------------------------------------------------------------------
+// THE DOMES — what the parkours were always under
+// ---------------------------------------------------------------------------
+
+/**
+ * Every parkour sits under a glass dome, and always did.
+ *
+ * While the game is still pretending, the domes are invisible and inert: you
+ * are inside one, being raced round it, and nothing about it is available to
+ * you. After the break-out they are the answer to a question the open world
+ * would otherwise have to fudge — "what stops the player driving back onto a
+ * live race?" Nothing stops them. The race is simply under sixty metres of
+ * glass, and the glass holds their weight.
+ *
+ * THE ONE RULE THAT MAKES IT WORK
+ * ------------------------------
+ * A dome is solid for a car only once that car has been *outside* it. You
+ * escaped from under parkur 3, so its dome is nothing to you right up until the
+ * moment you clear the rim — at which point it closes behind you and you can
+ * never get back under. See `src/world/dome.js`.
+ */
+export const DOME = {
+  enabled: true,
+  /**
+   * Footprint: the parkour's own extent, plus this much forest, metres. The
+   * radius is derived from the track rather than authored, so moving a control
+   * point moves the dome with it.
+   */
+  margin: 45,
+  /** Apex height as a fraction of the footprint radius. */
+  heightFactor: 0.2,
+  /**
+   * Shape of the shell: `height * (1 - u²)^exponent`, u = radius fraction.
+   *
+   * ONE is not a placeholder — it is a paraboloid, the flattest shape that still
+   * meets the ground at a finite angle, and it is chosen for HEADROOM. A loop
+   * parkour sits near the edge of its own footprint (u ≈ 0.86), so this exponent
+   * is what decides how much glass there is over the racing line: at 1.0 about
+   * seventeen metres, at 1.5 about nine. The pines out here are thirteen. Raise
+   * it and the forest starts growing through the roof.
+   */
+  profileExponent: 1.0,
+  /**
+   * Blur passes over the shell's terrain base. See `Dome#_sampleShell` — this is
+   * what keeps a dome a dome rather than a glass copy of the hills under it.
+   *
+   * Anchored to the raw heightfield the flanks reach 40–44° and a tenth of the
+   * roof is unclimbable. At 30 the median is 10–13°, the 99th percentile is
+   * about 30°, and roughly one percent is steeper than that. Past 30 passes the
+   * numbers barely move and the dome starts ignoring the valley it sits in.
+   */
+  basePasses: 30,
+  /**
+   * No tree is planted where the glass would cut through it. The band that gets
+   * cleared is wherever the shell stands less than this far off the ground — a
+   * little over the tallest pine. Somebody had to clear a ring to seat the
+   * thing, and the alternative is trunks skewering the panes.
+   */
+  treeClearance: 15,
+  /**
+   * Shell tessellation. This is also the lattice the *physics* reads, so the
+   * glass you can see and the glass you are driving on are the same surface by
+   * construction rather than by agreement — see `Dome#heightAt`. Ring spacing
+   * wants to stay near the terrain's own cell size (13m) or the shell stops
+   * following the ground it is anchored to.
+   */
+  rings: 26,
+  segments: 96,
+  /**
+   * How far the rim is sunk into the earth, metres.
+   *
+   * The shell is anchored to the terrain, and the terrain is not flat. Landing
+   * the rim exactly on the ground means it hovers a metre or two above every
+   * hollow, and a hovering rim is a step you hit at 40 m/s. Sunk, the shell
+   * simply emerges out of the hillside wherever it is going to — the ground
+   * wins until the glass is genuinely above it, and there is no edge anywhere.
+   */
+  groundBite: 1.5,
+  /**
+   * The panels are drawn coarser than the mesh: a seam every this many rings
+   * and this many segments. The lines still run along every lattice vertex, so
+   * they lie on the surface rather than chording across it.
+   */
+  seamRingStep: 2,
+  seamSegmentStep: 3,
+  /**
+   * Metres past the rim before the dome counts as closed behind you. Enough
+   * that you are clear of it and can see what you just came out of.
+   */
+  sealMargin: 25,
+  /**
+   * THE DIAL. Panel opacity, 0..1. At 0.08 the glass is a visible pane you can
+   * see the race lights through; drop it toward 0.02 for something nearer to
+   * clear glass, where the seams do all the work.
+   */
+  glassOpacity: 0.13,
+  /**
+   * How much brighter a pane gets when you are looking ALONG it rather than
+   * through it, as a multiple of `glassOpacity`, and how sharply it gets there.
+   *
+   * This is the other half of the dial above, and the reason the first one can
+   * stay low. Flat alpha cannot be both: at 0.13 the roof under the car is
+   * invisible, and at 0.5 you cannot see the race you climbed up here to watch.
+   * Real glass is clear face-on and a sheet of sky edge-on, and so is this — so
+   * the surface you are standing on reads solid while the pane you are looking
+   * straight down through stays a window. See `src/render/glass.js`.
+   */
+  glassRim: 5.0,
+  glassRimPower: 3.0,
+  /** Seam opacity. The seams are emissive and unfogged — they carry at range. */
+  seamOpacity: 0.55,
+  /** Seconds the glass takes to resolve when it is finally revealed. */
+  revealSeconds: 0.4,
+};
+
+// ---------------------------------------------------------------------------
 // TREES — trunk damage, and the disguise
 // ---------------------------------------------------------------------------
 

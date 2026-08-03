@@ -203,9 +203,11 @@ export class CameraRig {
     _offset.applyAxisAngle(_up, this._yaw);
     _desired.copy(t.position).add(_offset).add(this.positionBias);
 
-    // Never let the camera end up inside a hill.
+    // Never let the camera end up inside a hill — or, once the car is on top of
+    // a dome, inside the glass. The target is passed along because that is what
+    // decides whether a dome is a surface at all; see `World#sampleGround`.
     if (this.world?.sampleGround) {
-      const g = this.world.sampleGround(_desired.x, _desired.z);
+      const g = this.world.sampleGround(_desired.x, _desired.z, t);
       const minY = g.height + R.groundClearance;
       if (_desired.y < minY) _desired.y = minY;
       if (R.collisionAvoidance) this._avoidTerrain(t.position, _desired, R);
@@ -265,7 +267,7 @@ export class CameraRig {
       const x = lerp(from.x, to.x, k);
       const z = lerp(from.z, to.z, k);
       const y = lerp(from.y, to.y, k);
-      const h = this.world.sampleGround(x, z).height + R.groundClearance * 0.6;
+      const h = this.world.sampleGround(x, z, this.target).height + R.groundClearance * 0.6;
       if (y < h) {
         to.set(x, Math.max(y, h), z);
         return;

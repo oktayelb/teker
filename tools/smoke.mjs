@@ -1161,8 +1161,14 @@ section('8. saved sound settings actually reach the mix');
   off();
 
   ok('it reached localStorage', store.size === 1);
-  const reloaded = (await import('../src/config/settings.js?instance=read')).settings;
-  ok('a fresh page starts at the default', reloaded.get('musicVolume') === 1);
+  const readModule = await import('../src/config/settings.js?instance=read');
+  const reloaded = readModule.settings;
+  // Against DEFAULTS, not a literal. This asserted `=== 1` and so broke the
+  // moment the mix was retuned — which is a change to the game's balance, not
+  // to whether a fresh page reads its defaults.
+  ok('a fresh page starts at the default',
+    reloaded.get('musicVolume') === readModule.DEFAULTS.musicVolume,
+    `${reloaded.get('musicVolume')}`);
   reloaded.load();
   ok('…and load() brings the saved value back', reloaded.get('musicVolume') === 0.35);
 
@@ -1928,6 +1934,240 @@ section('14. the trees got a nudge, and still work');
     `${fellable.length} trees, ${broken.length} broken`);
   ok('…and they are all inside the collision grid', world.collision.count > fellable.length,
     `${world.collision.count} colliders, ${fellable.length} of them trees`);
+}
+
+// ---------------------------------------------------------------------------
+section('15. the handbrake is a parking brake');
+// "On space the car should not move at all, no matter how steep the surface is."
+// It used to creep: `handbrakeForce` (9000 N) against a 1100 kg car on a 20°
+// slope (~9200 N) is a stalemate the hill wins, and the pull is longitudinal
+// only, so parked ACROSS a slope nothing opposed the downhill component at all.
+{
+  const _n = new THREE.Vector3();
+  const span = world.terrain.halfSpan;
+  const rng = { s: 12345, next() { this.s = (this.s * 1103515245 + 12345) & 0x7fffffff; return this.s / 0x7fffffff; } };
+  let steep = null;
+  for (let i = 0; i < 40000; i++) {
+    const x = (rng.next() * 2 - 1) * span * 0.9;
+    const z = (rng.next() * 2 - 1) * span * 0.9;
+    world.terrain.normalAt(x, z, _n);
+    const deg = (Math.acos(Math.min(1, _n.y)) * 180) / Math.PI;
+    if (!steep || deg > steep.deg) steep = { x, z, deg };
+  }
+  ok('there is genuinely steep ground to test on', steep.deg > 25, `${steep.deg.toFixed(1)}°`);
+
+  // Settle first, THEN measure. A car teleported onto a cliff face arrives
+  // airborne and slides a metre or two before it is on the ground at all, which
+  // is the spawn, not the brake. The question is whether a car that has come to
+  // rest under the handbrake ever moves again.
+  const park = (heading, handbrake) => {
+    const v = new Vehicle({ world, id: 'brake' });
+    v.reset(new THREE.Vector3(steep.x, 0, steep.z), heading);
+    const cmd = () => ({ throttle: 0, brake: 0, steer: 0, handbrake });
+    simulate(v, 240, cmd);
+    const from = v.position.clone();
+    simulate(v, 1200, cmd);
+    return { drift: Math.hypot(v.position.x - from.x, v.position.z - from.z), speed: v.speed };
+  };
+
+  // Every heading, because the failure was direction-dependent: pointing down
+  // the hill the longitudinal brake fought it, pointing across it did nothing.
+  let worst = 0;
+  let fastest = 0;
+  for (const h of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+    const r = park(h, 1);
+    worst = Math.max(worst, r.drift);
+    fastest = Math.max(fastest, r.speed);
+  }
+  ok('a held handbrake does not move at all', worst < 0.01,
+    `worst drift ${worst.toFixed(4)}m over 10s, final speed ${fastest.toFixed(4)}`);
+  // …and the slope it is being held against is real, not a flat patch.
+  ok('…on ground that would otherwise roll away', park(0, 0).drift > 5,
+    `${park(0, 0).drift.toFixed(1)}m without it`);
+
+  // It has to stop a moving car, not just hold a stopped one — the hold only
+  // engages below walking pace, so the car has to be able to get there.
+  {
+    const v = new Vehicle({ world, id: 'brake2' });
+    v.reset(new THREE.Vector3(steep.x, 0, steep.z), 0);
+    v.velocity.set(0, 0, 25);
+    simulate(v, 1200, () => ({ throttle: 0, brake: 0, steer: 0, handbrake: 1 }));
+    ok('…and it brings a car doing 25 m/s to a dead stop', v.speed < 0.01, `${v.speed.toFixed(3)} m/s`);
+  }
+
+  // None of which may cost the handbrake turn, which is the other half of what
+  // the key is for. See TUNING.handbrakeSlideSpeed.
+  {
+    const t = world.getTrack('track1');
+    const i = 40;
+    const v = new Vehicle({ world, id: 'brake3' });
+    v.reset(new THREE.Vector3(t.px[i], t.py[i], t.pz[i]), Math.atan2(t.tx[i], t.tz[i]));
+    v.velocity.set(v.forward.x * 24, 0, v.forward.z * 24);
+    let slip = 0;
+    simulate(v, 200, () => {
+      slip = Math.max(slip, Math.abs(v.latSpeed));
+      return { throttle: 0.2, brake: 0, steer: 1, handbrake: 1 };
+    });
+    ok('a handbrake turn still breaks the back end away', slip > 3, `${slip.toFixed(1)} m/s of slip at 24 m/s`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+section('16. the glass over the parkours');
+// The domes are the answer to "what stops the player driving back onto a race
+// that is still running" — nothing does; the race has a roof. Almost all of
+// this is geometry that can only be checked by measuring it, and every number
+// below has already been wrong once.
+{
+  const { DOME } = await import('../src/config/gameplay.js');
+  const { SURFACES } = await import('../src/config/tuning.js');
+  const { events } = await import('../src/core/events.js');
+  const field = world.domes;
+
+  ok('every parkour is under one', field.count === world.tracks.size, `${field.count} domes`);
+  ok('glass is a surface the car knows about', !!SURFACES.GLASS, SURFACES.GLASS?.id);
+
+  for (const d of field.domes) {
+    const t = world.getTrack(d.id);
+    let outside = 0;
+    let headroom = Infinity;
+    for (let i = 0; i < t.count; i++) {
+      if (d.distanceTo(t.px[i], t.pz[i]) + t.halfWidth[i] > d.radius) outside++;
+      headroom = Math.min(headroom, d.heightAt(t.px[i], t.pz[i]) - t.py[i]);
+    }
+    ok(`${d.id} is entirely under its own dome`, outside === 0,
+      `R=${Math.round(d.radius)}m, H=${Math.round(d.height)}m`);
+    // A loop track runs near the edge of its own footprint, which is where a
+    // dome is lowest. Nine metres of headroom is what `profileExponent: 1.5`
+    // gave, and the pines out here are thirteen.
+    ok(`${d.id} has real headroom over the racing line`, headroom > 15,
+      `${headroom.toFixed(1)}m at the tightest point`);
+  }
+
+  // Two domes overlapping would give a car two floors to be on. `domeAt` picks
+  // the higher, so it would not crash — it would just be quietly wrong.
+  let closest = Infinity;
+  for (let i = 0; i < field.count; i++) {
+    for (let j = i + 1; j < field.count; j++) {
+      const a = field.domes[i];
+      const b = field.domes[j];
+      closest = Math.min(closest, Math.hypot(a.centerX - b.centerX, a.centerZ - b.centerZ) - a.radius - b.radius);
+    }
+  }
+  ok('no two domes overlap', closest > 0, `closest pair clears by ${Math.round(closest)}m`);
+
+  // THE ROOF HAS TO BE DRIVABLE. Anchored to the raw heightfield the flanks
+  // reached 44°, which is a wall. See DOME.basePasses.
+  {
+    const n = new THREE.Vector3();
+    const slopes = [];
+    for (const d of field.domes) {
+      for (let ri = 1; ri < 60; ri++) {
+        for (let ai = 0; ai < 90; ai++) {
+          const r = (ri / 60) * d.radius * 0.999;
+          const a = (ai / 90) * Math.PI * 2;
+          const x = d.centerX + Math.cos(a) * r;
+          const z = d.centerZ + Math.sin(a) * r;
+          // Below this the ground is still winning and you are not on glass.
+          if (d.heightAt(x, z) - world.terrain.heightAt(x, z) < 12) continue;
+          d.normalAt(x, z, n);
+          slopes.push((Math.acos(Math.min(1, n.y)) * 180) / Math.PI);
+        }
+      }
+    }
+    slopes.sort((a, b) => a - b);
+    const median = slopes[Math.floor(slopes.length / 2)];
+    const p99 = slopes[Math.floor(slopes.length * 0.99)];
+    ok('the roof is a gentle slope almost everywhere', median < 16, `median ${median.toFixed(1)}°`);
+    ok('…and climbable at the 99th percentile', p99 < 33, `p99 ${p99.toFixed(1)}°`);
+  }
+
+  // The rim has to come down into the earth, not hover over it. A hovering rim
+  // is a step you hit at 40 m/s.
+  {
+    let floating = 0;
+    let samples = 0;
+    for (const d of field.domes) {
+      for (let k = 0; k < 240; k++) {
+        const a = (k / 240) * Math.PI * 2;
+        const r = d.radius * 0.997;
+        const x = d.centerX + Math.cos(a) * r;
+        const z = d.centerZ + Math.sin(a) * r;
+        samples++;
+        if (d.heightAt(x, z) > world.terrain.heightAt(x, z)) floating++;
+      }
+    }
+    ok('the rim is sunk into the ground all the way round', floating === 0, `${floating} of ${samples} float`);
+  }
+
+  // Nothing tall grows where the glass comes down. The cleared ring is what
+  // stops trunks skewering the panes; see DOME.treeClearance.
+  {
+    let skewered = 0;
+    let trees = 0;
+    for (const c of world.scatter.colliders) {
+      if (!['pine', 'broadleaf', 'dead'].includes(c.kind)) continue;
+      trees++;
+      for (const d of field.domes) {
+        if (d.distanceTo(c.x, c.z) > d.radius) continue;
+        const h = d.heightAt(c.x, c.z);
+        if (h > c.y - c.height / 2 && h < c.y + c.height / 2) skewered++;
+      }
+    }
+    ok('no tree is run through by a pane', skewered === 0, `${trees} trees checked`);
+  }
+
+  // THE ONE RULE. A dome is solid only for a car that has been outside it —
+  // which is the entire reason the player can escape from under parkur 3 and
+  // still never get back in.
+  {
+    const d3 = field.byId('track3');
+    const player = { position: new THREE.Vector3(d3.centerX + 60, 0, d3.centerZ), isPlayer: true };
+    const rival = { position: new THREE.Vector3(d3.centerX + 60, 0, d3.centerZ), isPlayer: false };
+
+    let revealedWith = null;
+    const off = events.on('world:domesRevealed', (p) => { revealedWith = p.trackId; });
+
+    field.arm();
+    field.sync([player, rival]);
+    ok('under the glass it is not there yet', !field.sealedFor(player, d3));
+    ok('…and the ground underneath is the ground',
+      world.sampleGround(player.position.x, player.position.z, player).surface !== 'GLASS');
+    ok('…and nothing has been revealed', !field.revealed);
+
+    // Out from under the rim.
+    player.position.set(d3.centerX + d3.radius + DOME.sealMargin + 5, 0, d3.centerZ);
+    field.sync([player, rival]);
+    ok('it closes behind you', field.sealedFor(player, d3));
+    ok('…and that is what reveals them', field.revealed && revealedWith === 'track3', revealedWith);
+
+    // Back to where the escape happened. There is a roof there now.
+    player.position.set(d3.centerX + 60, 0, d3.centerZ);
+    const onTop = world.sampleGround(player.position.x, player.position.z, player);
+    const under = world.sampleGround(rival.position.x, rival.position.z, rival);
+    ok('you cannot get back under it', onTop.surface === 'GLASS', `${onTop.height.toFixed(0)}m up`);
+    ok('…but the cars still racing under it never left', under.surface !== 'GLASS',
+      `${under.surface} at ${under.height.toFixed(0)}m`);
+    ok('the fore-and-aft probes agree with the centre',
+      Math.abs(world.groundHeightAt(player.position.x, player.position.z, player) - onTop.height) < 0.001);
+    ok('a caller with no car in the question sees no glass',
+      world.sampleGround(player.position.x, player.position.z).surface !== 'GLASS');
+
+    // A car put back on the TERRAIN under a dome it is sealed against is
+    // immediately below its own ground, so it is rescued again, and again, and
+    // never moves. `Game#_rescueFallen` is the caller that made this real.
+    const rescue = world.safePlaceNear(player.position.x, player.position.z, player);
+    ok('a rescue puts you on the glass, not under it',
+      rescue.y > onTop.height, `${rescue.y.toFixed(0)}m vs ${onTop.height.toFixed(0)}m of glass`);
+    // …and a cruiser spawned on top of one starts out already sealed against
+    // it, or it drops through the roof it was standing on. See DomeField#_stateFor.
+    const cop = { position: new THREE.Vector3(player.position.x, onTop.height + 1, player.position.z) };
+    field.sync([cop]);
+    ok('a car that arrives on top of a dome is standing on it',
+      field.sealedFor(cop, d3));
+
+    off();
+  }
 }
 
 function pointLineDistance(p, a, b) {
