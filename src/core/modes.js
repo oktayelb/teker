@@ -33,6 +33,20 @@ export class Mode {
   render(_alpha) {}
   /** Optional: called when the window resizes. */
   resize(_w, _h) {}
+
+  /**
+   * Optional: what this mode wants the minimap to know.
+   *
+   * `Game` already knows where the player and the cars are; a mode is the only
+   * thing that knows which checkpoint you are heading for or which ribbon you
+   * are supposed to be on. Returning nothing is correct for a mode that has no
+   * opinion, which is most of them.
+   *
+   * @returns {{activeTrack?: string|null, nextCheckpoint?: number|null}|null}
+   */
+  mapState() {
+    return null;
+  }
 }
 
 export class ModeManager {
@@ -113,5 +127,9 @@ export class ModeManager {
   }
   resize(w, h) {
     this.current?.resize(w, h);
+  }
+  /** @see Mode#mapState */
+  mapState() {
+    return this.current?.active ? this.current.mapState() : null;
   }
 }

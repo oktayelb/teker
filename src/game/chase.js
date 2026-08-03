@@ -207,6 +207,10 @@ export class ChaseSystem {
     for (const c of this.cops) {
       c.ramCooldown = Math.max(0, c.ramCooldown - dt);
       c.sees = this._canSee(c.vehicle);
+      // Mirrored onto the car itself so the minimap can draw a cruiser that has
+      // eyes on you differently from one that has not, without the UI having to
+      // know this system exists.
+      c.vehicle.pursuing = c.sees;
       if (c.sees) anySees = true;
     }
 

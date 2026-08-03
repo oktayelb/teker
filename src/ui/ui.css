@@ -453,7 +453,6 @@ body {
 .tk-hud-heat { grid-area: tc; justify-self: center; align-self: start; }
 .tk-hud-standings { grid-area: tr; justify-self: end; align-self: start; text-align: right; }
 .tk-hud-warning { grid-area: mc; justify-self: center; align-self: center; }
-.tk-hud-minimap { grid-area: mr; justify-self: end; align-self: center; }
 .tk-hud-mark { grid-area: bl; justify-self: start; align-self: end; }
 .tk-hud-speed { grid-area: br; justify-self: end; align-self: end; text-align: right; }
 
@@ -598,11 +597,61 @@ body {
   animation: tk-warn 0.4s steps(2, end) infinite;
 }
 
+/* -- minimap --------------------------------------------------------------- */
+/* The host is taken out of the HUD's grid and positioned against the padding
+   box instead, because `MINIMAP.anchor` has to be able to name a corner that
+   the timing panel or the speed readout is already sitting in. Its size is
+   written from JS (see `Minimap#resize`) — one clamp, in one language. */
+
 .tk-hud-minimap {
-  width: clamp(70px, 12vmin, 130px);
-  aspect-ratio: 1;
-  opacity: 0.5;
+  position: absolute;
+  /* `inset: 0` is already the full screen, not the HUD's content area: the
+     containing block of an absolutely positioned child is its ancestor's
+     *padding box*, which includes the HUD's `padding: var(--pad)`. Insetting
+     negatively to "cancel" that gutter pushes the map a whole gutter off the
+     edge of the viewport, which is exactly the bug it looks like. */
+  inset: 0;
+  pointer-events: none;
 }
+
+.tk-minimap {
+  --tk-map-margin: 16px;
+  --tk-map-opacity: 0.88;
+  --tk-map-fade: 0.18s;
+  position: absolute;
+  opacity: 0;
+  transform: scale(0.94);
+  transition:
+    opacity var(--tk-map-fade) linear,
+    transform var(--tk-map-fade) ease-out;
+  /* Not `display:none` when closed: the canvas keeps its backing store and its
+     size, so opening it is a fade rather than a re-allocation and a reflow. */
+  visibility: hidden;
+}
+
+.tk-minimap.is-open {
+  opacity: var(--tk-map-opacity);
+  transform: scale(1);
+  visibility: visible;
+}
+
+.tk-minimap-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Corners. `MINIMAP.anchor` is written to the data attribute verbatim. */
+.tk-minimap[data-anchor="top-right"]    { top: var(--tk-map-margin); right: var(--tk-map-margin); }
+.tk-minimap[data-anchor="top-left"]     { top: var(--tk-map-margin); left: var(--tk-map-margin); }
+.tk-minimap[data-anchor="bottom-right"] { bottom: var(--tk-map-margin); right: var(--tk-map-margin); }
+.tk-minimap[data-anchor="bottom-left"]  { bottom: var(--tk-map-margin); left: var(--tk-map-margin); }
+.tk-minimap[data-anchor="right"]        { top: 50%; right: var(--tk-map-margin); translate: 0 -50%; }
+.tk-minimap[data-anchor="left"]         { top: 50%; left: var(--tk-map-margin); translate: 0 -50%; }
+
+/* The circular shape is clipped on the canvas too, so this only rounds the
+   element for the sake of anything that ever gets a background or a shadow. */
+.tk-minimap[data-shape="circle"] { border-radius: 50%; }
 
 /* -- per-mode HUD personalities ------------------------------------------- */
 /* The mode attribute is the only thing gameplay sets; visibility is CSS. */

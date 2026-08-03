@@ -40,14 +40,20 @@ const _normal = new THREE.Vector3();
  * where they are *before* the terrain mesh is built — a path that leads
  * somewhere has to be painted into the ground at the same moment the ground is
  * (`world/trails.js`). `OPEN_WORLD.trails.links` indexes into this array.
+ *
+ * `map.icon` is how a landmark draws on the minimap, and it is the only thing a
+ * *new* landmark has to declare to appear there: the key names an entry in
+ * `MINIMAP_ICONS` (`src/config/minimap.js`), which the map looks up. Leave it
+ * off and you get the generic ring, which is the right answer for a place that
+ * does not have a shape yet.
  */
 export const LANDMARK_DEFS = [
-  { name: 'Vadi', label: 'the valley floor', angle: 0.4, dist: 0.34, radius: 90 },
-  { name: 'Kule', label: 'a radio mast, unlit', angle: 2.1, dist: 0.62, radius: 70 },
-  { name: 'Göl', label: 'still water', angle: 3.4, dist: 0.48, radius: 110 },
-  { name: 'Taşlar', label: 'stones in a ring', angle: 4.6, dist: 0.55, radius: 60 },
-  { name: 'Sırt', label: 'the ridge', angle: 5.5, dist: 0.72, radius: 100 },
-  { name: 'Kenar', label: 'where the fog does not lift', angle: 1.2, dist: 0.93, radius: 140 },
+  { name: 'Vadi', label: 'the valley floor', angle: 0.4, dist: 0.34, radius: 90, map: { icon: 'valley' } },
+  { name: 'Kule', label: 'a radio mast, unlit', angle: 2.1, dist: 0.62, radius: 70, map: { icon: 'mast' } },
+  { name: 'Göl', label: 'still water', angle: 3.4, dist: 0.48, radius: 110, map: { icon: 'water' } },
+  { name: 'Taşlar', label: 'stones in a ring', angle: 4.6, dist: 0.55, radius: 60, map: { icon: 'stones' } },
+  { name: 'Sırt', label: 'the ridge', angle: 5.5, dist: 0.72, radius: 100, map: { icon: 'ridge' } },
+  { name: 'Kenar', label: 'where the fog does not lift', angle: 1.2, dist: 0.93, radius: 140, map: { icon: 'edge' } },
 ];
 
 export class World {
@@ -338,6 +344,8 @@ export class World {
         position: new THREE.Vector3(x, this.terrain.heightAt(x, z), z),
         radius: d.radius,
         discovered: false,
+        /** Carried through untouched; the minimap is the only reader. */
+        map: d.map || null,
       });
     }
 

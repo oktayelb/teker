@@ -19,7 +19,20 @@ export const BINDINGS = {
   lookBehind: ['KeyV'],
   cycleCamera: ['KeyC'],
   respawn: ['KeyR'],
-  horn: ['KeyH'],
+  /**
+   * The horn. Moved off KeyH when the map took that key.
+   *
+   * Nothing reads this yet — `audio.playHorn()` exists and is unwired — but a
+   * dead binding sharing a key with a live one is a trap for whoever wires it
+   * up, because it would work everywhere except on top of the map.
+   */
+  horn: ['KeyB'],
+  /**
+   * The map. Like `headlights` below, not a driving input: `Game` reads the raw
+   * key event so it still works while the human's controls are locked. Held
+   * with Shift it cycles zoom instead of closing — see `MINIMAP.zoomModifier`.
+   */
+  minimap: ['KeyH'],
   /**
    * Headlights. Not a driving input — it never touches `InputState`, because
    * the car's lights are the car's state, not this frame's intent. `Game`
@@ -120,13 +133,17 @@ export class Input {
     if (e.repeat) return;
     this._down.add(e.code);
     this._pressedThisFrame.add(e.code);
-    events.emit('input:key', { code: e.code, down: true });
+    // Modifiers ride along because a global key can mean two things depending on
+    // them (Shift+H zooms the map, H closes it) and the raw event is the only
+    // place that knowledge exists — `_down` cannot tell a Shift held *for this
+    // keystroke* from one that happens to be down.
+    events.emit('input:key', { code: e.code, down: true, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
   }
 
   _onKeyUp(e) {
     this._down.delete(e.code);
     this._releasedThisFrame.add(e.code);
-    events.emit('input:key', { code: e.code, down: false });
+    events.emit('input:key', { code: e.code, down: false, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
   }
 
   _onBlur() {

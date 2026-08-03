@@ -17,6 +17,7 @@
  */
 
 import { createWordmark } from './logo.js';
+import { Minimap } from './minimap.js';
 import { resolveTheme, hexToCss } from '../config/style.js';
 
 /** Segments in the speed bar. */
@@ -91,6 +92,15 @@ export class Hud {
     this._flash = 0;
     this._theme = null;
     this._segments = [];
+
+    // Constructed here, like everything else, so `hud.minimap.setWorld(...)` is
+    // safe to call before mount. It builds no DOM until its own mount().
+    this._minimap = new Minimap(null);
+  }
+
+  /** The map behind H. See `src/config/minimap.js` for everything it does. */
+  get minimap() {
+    return this._minimap;
   }
 
   mount() {
@@ -135,8 +145,11 @@ export class Hud {
     // -- warning (centre) ---------------------------------------------------
     const warning = el('div', 'tk-hud-warning tk-txt', '');
 
-    // -- minimap (right) ----------------------------------------------------
-    const minimap = el('div', 'tk-hud-minimap tk-panel');
+    // -- minimap ------------------------------------------------------------
+    // A positioned host, not a grid cell: the map's corner is a config value
+    // (`MINIMAP.anchor`) and it has to be able to sit where the timing panel or
+    // the speed readout already lives without fighting the grid for the slot.
+    const minimap = el('div', 'tk-hud-minimap');
 
     // -- wordmark (bottom-left) --------------------------------------------
     const mark = el('div', 'tk-hud-mark');
@@ -163,22 +176,29 @@ export class Hud {
     this._standings = standings;
     this._heat = heat;
     this._warning = warning;
-    this._minimap = minimap;
+    // NOT `this._minimap` — that is the Minimap component. `minimap` here is
+    // only the positioned host it mounts its canvas into, below.
+    this._minimapHost = minimap;
 
     // Nothing has been fed to us yet — start from a clean, hidden state.
     warning.classList.add('tk-hidden');
     heat.classList.add('tk-hidden');
-    minimap.classList.add('tk-hidden');
     this._best.classList.add('tk-hidden');
     this._delta.classList.add('tk-hidden');
 
     this.root.append(hud);
+    // The map builds its canvas into the host above. It manages its own
+    // visibility from here on — see `Minimap#setVisible` and `#setMode`.
+    this._minimap.root = minimap;
+    this._minimap.mount();
+    this._minimap.setMode(this._mode);
     if (this._theme) this.applyTheme(this._theme);
     this.setVisible(this._visible);
     return this;
   }
 
   unmount() {
+    this._minimap.dispose();
     this.el?.remove();
     this.el = null;
     this._segments.length = 0;
@@ -313,14 +333,18 @@ export class Hud {
   }
 
   /**
-   * Accepted for API completeness. The minimap panel exists in the DOM but is
-   * left blank: a map is exactly the wrong thing to hand a player whose whole
-   * arc is discovering the world has no edges. Pass `null` to hide it.
+   * Show or hide the map.
+   *
+   * This used to be a deliberate no-op — a map being "exactly the wrong thing to
+   * hand a player whose whole arc is discovering the world has no edges". The
+   * map now exists, and that argument is answered by it being *closed* until the
+   * player asks for it with H rather than by it not existing. See
+   * `MINIMAP.startVisible` if you want the old policy back in one line.
+   *
+   * @param {boolean|null} on `null` hides, for the old call convention
    */
-  setMinimap(data) {
-    if (!this.el) return;
-    this._minimapData = data ?? null;
-    this._minimap.classList.toggle('tk-hidden', !this._minimapData);
+  setMinimap(on) {
+    this._minimap.setVisible(!!on);
   }
 
   /** @param {'race'|'openWorld'|'chase'|'none'} name */
@@ -329,6 +353,9 @@ export class Hud {
     if (mode === this._mode) return;
     this._mode = mode;
     if (this.el) this.el.dataset.mode = mode;
+    // The map is allowed in some HUD personalities and not others; it decides,
+    // and it remembers whether the player had it open across the gap.
+    this._minimap.setMode(mode);
   }
 
   get mode() {
@@ -345,13 +372,32 @@ export class Hud {
     // Component-local overrides only; the global palette lives on #ui-root.
     if (ui.bad != null) this.el.style.setProperty('--bad', hexToCss(ui.bad));
     if (ui.accentAlt != null) this.el.style.setProperty('--accent-alt', hexToCss(ui.accentAlt));
+    // The map paints on a canvas, where a CSS custom property is no use to it;
+    // it needs the resolved theme object to look colours up itself.
+    this._minimap.applyTheme(this._theme);
   }
 
-  /** Per-frame. Only the checkpoint flash needs time here. */
-  update(dt) {
+  /**
+   * Per-frame.
+   *
+   * `mapState` is forwarded straight to the minimap and is the only reason this
+   * takes a second argument — everything else on the HUD is push-based. A map
+   * cannot be: it needs where the player is *this frame*, and asking gameplay to
+   * push that sixty times a second would be a worse contract than reading it.
+   *
+   * @param {number} dt seconds
+   * @param {object} [mapState] see `Minimap#update`
+   */
+  update(dt, mapState = null) {
+    this._minimap.update(dt, mapState);
     if (!this.el || this._flash <= 0) return;
     this._flash = Math.max(0, this._flash - (Number(dt) || 0) / FLASH_TIME);
     this._timing.style.setProperty('--flash', this._flash.toFixed(3));
+  }
+
+  /** Viewport changed. The map owns a canvas, so it needs to know. */
+  resize() {
+    this._minimap.resize();
   }
 }
 

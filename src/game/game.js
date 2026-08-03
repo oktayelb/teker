@@ -29,6 +29,7 @@ import { ALL_TRACKS } from '../world/tracks/index.js';
 import { MODE_RIGS } from '../config/camera.js';
 import { OPEN_WORLD, PLAYER } from '../config/gameplay.js';
 import { ACTIVE_PROFILE } from '../config/tuning.js';
+import { MINIMAP } from '../config/minimap.js';
 import { settings } from '../config/settings.js';
 import { clamp01 } from '../core/mathx.js';
 
@@ -131,6 +132,9 @@ export class Game {
 
     await this.world.build({ trackData: ALL_TRACKS, onProgress });
     this.renderer.addRoot(this.world.root);
+    // The map indexes the forest and the ribbons once, here, rather than
+    // rediscovering them every frame. See `Minimap#setWorld`.
+    this.ui.minimap.setWorld(this.world);
 
     globalThis.addEventListener('resize', this._boundResize);
     this._onResize();
@@ -187,6 +191,10 @@ export class Game {
       world: this.world,
       id: id || `${kind}-${this.vehicles.length}`,
     });
+    // Stamped on the vehicle, not only handed to the chassis: the minimap has to
+    // tell a cruiser from a rival, and reading it back off the paintwork or
+    // parsing the id string would both be worse.
+    v.kind = kind;
     const chassis = createChassis({
       materials: this.materials,
       theme: this.renderer.theme,
@@ -275,9 +283,34 @@ export class Game {
     // Its *counters* must not: a countdown is race logic that happens to live
     // in the UI, and on real time it kept ticking behind the pause menu.
     this.ui.setPaused(this.loop.paused);
-    this.ui.update(this.loop.rawDt ?? dt);
+    this.ui.update(this.loop.rawDt ?? dt, this._mapState());
     this._updateAudio(dt);
     this.input.endFrame();
+  }
+
+  /**
+   * What the minimap is shown this frame.
+   *
+   * Assembled here because this is the one object that holds the player, every
+   * other car and the world at once. The race-specific half — which ribbon is
+   * live, which checkpoint is next — comes from the mode, which is the only
+   * thing that knows it. See `Mode#mapState`.
+   *
+   * The object is reused rather than rebuilt: this runs every frame and the
+   * minimap reads it immediately and keeps nothing.
+   */
+  _mapState() {
+    const s = this._mapStateObj || (this._mapStateObj = {});
+    s.player = this.player;
+    s.vehicles = this.vehicles;
+    s.activeTrack = this.world?.activeTrack?.id ?? null;
+    s.nextCheckpoint = null;
+    const fromMode = this.modes.mapState();
+    if (fromMode) {
+      if (fromMode.activeTrack !== undefined) s.activeTrack = fromMode.activeTrack;
+      if (fromMode.nextCheckpoint !== undefined) s.nextCheckpoint = fromMode.nextCheckpoint;
+    }
+    return s;
   }
 
   _fixedUpdate(dt) {
@@ -341,11 +374,12 @@ export class Game {
     this.canvas.width = w;
     this.canvas.height = h;
     this.renderer.resize(w, h);
+    this.ui.resize();
     this.modes.resize(w, h);
   }
 
   _wireGlobalKeys() {
-    events.on('input:key', ({ code, down }) => {
+    events.on('input:key', ({ code, down, shift }) => {
       if (!down) return;
       // Read raw key events rather than the input state, so these still work
       // while the human's driving controls are locked during a cutscene.
@@ -358,9 +392,47 @@ export class Game {
         events.emit('ui:subtitle', { text: `KAMERA · ${next}`, duration: 1.1, tone: 'system' });
       }
       if (bound('headlights')) this.toggleHeadlights();
+      if (bound('minimap')) this.toggleMinimap({ shift });
       if (bound('debugPanel')) this.toggleDebugPanel();
       if (bound('pause')) this.togglePause();
     });
+  }
+
+  /**
+   * The map, on the player's screen.
+   *
+   * Lives on `Game` for the same two reasons the headlights do: it is not a
+   * rule, so a mode owning it would have to be copied into every other mode;
+   * and `_wireGlobalKeys` reads the raw key event, which is the only channel
+   * that survives `input.setLocked(true)`. Being unable to steer during a
+   * cutscene is the scene; being unable to look at the map is a broken game.
+   *
+   * With the modifier held it cycles zoom instead of closing, so the whole
+   * feature is one key. See `MINIMAP.zoomModifier`.
+   *
+   * @param {{shift?: boolean}} [mods] modifier state from the key event
+   * @returns {boolean} whether the map is now open
+   */
+  toggleMinimap(mods = {}) {
+    const map = this.ui.minimap;
+    const zooming = MINIMAP.zoomModifier === 'shift' && mods.shift && map.visible;
+    if (zooming) {
+      const range = map.cycleZoom(1);
+      if (MINIMAP.announceToggle) {
+        events.emit('ui:subtitle', { text: `HARİTA · ${Math.round(range)}m`, duration: 1.1, tone: 'system' });
+      }
+      return true;
+    }
+    const on = map.toggle();
+    if (MINIMAP.announceToggle) {
+      events.emit('ui:subtitle', {
+        text: `HARİTA · ${on ? 'AÇIK' : 'KAPALI'}`,
+        duration: 1.1,
+        tone: 'system',
+      });
+    }
+    events.emit('ui:minimap', { on });
+    return on;
   }
 
   /**

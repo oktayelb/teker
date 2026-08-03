@@ -29,6 +29,7 @@ import { SettingsMenu } from './settingsMenu.js';
 
 export { createLogo, createWordmark } from './logo.js';
 export { Hud } from './hud.js';
+export { Minimap } from './minimap.js';
 export { Screens } from './screens.js';
 export { Subtitles } from './subtitles.js';
 export { formatTime, formatDelta } from './hud.js';
@@ -86,6 +87,10 @@ export class UI {
 
   get hud() {
     return this._hud;
+  }
+  /** The map behind H. Lives in the HUD; surfaced here so callers need one name. */
+  get minimap() {
+    return this._hud.minimap;
   }
   get screens() {
     return this._screens;
@@ -243,19 +248,29 @@ export class UI {
     return this;
   }
 
-  /** Per-frame. `dt` in seconds. */
-  update(dt) {
+  /**
+   * Per-frame.
+   * @param {number} dt seconds
+   * @param {object} [mapState] forwarded to the minimap; see `Minimap#update`
+   */
+  update(dt, mapState = null) {
     this._lastExternal = nowMs();
-    this._tick(dt);
+    this._tick(dt, mapState);
+  }
+
+  /** Viewport changed. Only the minimap's canvas cares. */
+  resize() {
+    this._hud.resize();
+    return this;
   }
 
   // -------------------------------------------------------------------------
   // internals
   // -------------------------------------------------------------------------
 
-  _tick(dt) {
+  _tick(dt, mapState = null) {
     const d = Number(dt) || 0;
-    this._hud.update(d);
+    this._hud.update(d, mapState);
     this._screens.update(d);
     this._subtitles.update(d);
     this._updateJitter(d);

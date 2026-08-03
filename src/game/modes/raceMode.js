@@ -274,6 +274,25 @@ export class RaceMode extends Mode {
     this.rivals.length = 0;
   }
 
+  /**
+   * What the minimap gets from a race: which ribbon is the live one, and which
+   * checkpoint the player is actually driving at. Nothing else in the game
+   * holds either fact.
+   * @see Mode#mapState
+   */
+  mapState() {
+    if (!this.track) return null;
+    const player = this.ctx.player;
+    const p = player ? this.progress.find((q) => q.vehicle === player) : null;
+    const n = this.track.checkpoints.length;
+    return {
+      activeTrack: this.track.id,
+      // `lastCheckpoint` is -1 before the first one is taken, which makes the
+      // next one 0 — correct, and the reason this is not a guarded expression.
+      nextCheckpoint: p && n > 0 ? (p.lastCheckpoint + 1) % n : null,
+    };
+  }
+
   fixedUpdate(dt) {
     if (this.state !== 'racing') return;
     this.time += dt;
