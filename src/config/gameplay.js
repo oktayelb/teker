@@ -305,18 +305,175 @@ export const OPEN_WORLD = {
   terrainResolution: 220,
   /** Metres between terrain samples. resolution * cellSize = world span. */
   terrainCellSize: 13,
-  /** Trees, rocks and grass tufts across the whole world. */
+  /** Trees, rocks and undergrowth across the whole world. */
   scatterDensity: {
     trees: 4200,
     rocks: 900,
     bushes: 2400,
-    grass: 5200,
+    /** The understorey. Placed only within `understoreyRadius` of a trunk. */
+    ferns: 1600,
+    undergrowth: 1500,
+    litter: 1700,
     /** Somebody was out here. Sparse on purpose — finding one should register. */
     posters: 140,
     wrecks: 70,
   },
+  /**
+   * How far from a trunk ferns, undergrowth and leaf litter will grow, metres.
+   *
+   * This is what makes the understorey an *understorey* rather than a second
+   * even scattering: the trees go down first, and everything low is then only
+   * offered ground within this radius of one of them. Widen it and the forest
+   * floor becomes a meadow; narrow it and you get neat rings around trunks.
+   */
+  understoreyRadius: 15,
   /** Draw distance for scattered props, metres. Fog hides the pop-in. */
   scatterDrawDistance: 340,
+
+  /**
+   * GROUND COVER — grass that is actually there.
+   *
+   * Grass used to be scattered like trees: 5200 tufts over a 2860m span, one
+   * per 1500m², which is a tuft every forty metres and therefore no grass at
+   * all. Scattering ten times more would cost ten times the memory to fill a
+   * world you can never see one percent of at once.
+   *
+   * So it is a POOL, the way `WILDLIFE` is. A fixed population lives in bands
+   * that follow the camera; anything that falls out of its band is reflected
+   * through the camera to the far edge of the same band, where it grows in out
+   * of the fog. Nothing is allocated after `build()`, and the numbers below are
+   * how much grass is AROUND YOU rather than how much exists.
+   *
+   * Two bands, because one is either too sparse underfoot or too expensive at
+   * distance. The near band is thick and finely bladed; the far band is coarse,
+   * larger and cheaper per tuft — level of detail expressed as data.
+   */
+  groundCover: {
+    bands: [
+      /** Underfoot: about one tuft per 1.4m², which reads as continuous turf. */
+      { count: 1300, radius: 25, blades: 4, scale: [0.7, 1.25], variants: 4 },
+      /** Out to the fog: sparser, but each tuft is bigger so it still reads. */
+      { count: 1500, radius: 78, blades: 3, scale: [1.15, 2.1], variants: 3 },
+    ],
+    /**
+     * Fraction of a band's radius over which a tuft scales in from nothing.
+     * This is the whole anti-pop-in mechanism: recycled tufts always arrive at
+     * the band edge, and they arrive at zero size. 0 would make them appear.
+     */
+    fadeBand: 0.22,
+    /** Do not bother rewriting an instance matrix for a smaller change. */
+    fadeEpsilon: 0.02,
+    /**
+     * Nothing grows on a slope steeper than this (Terrain's 0..1 metric).
+     *
+     * Matched to `GROUND_PAINT.wearFull` in `style.js`, which is the slope at
+     * which the terrain's own vertex colours have gone entirely to bare earth.
+     * Grass standing on ground that is painted as stripped soil is the kind of
+     * contradiction you notice without being able to say why.
+     */
+    maxSlope: 0.14,
+    /** Terrain surfaces grass will root in. CLIFF is bare rock by definition. */
+    surfaces: ['GRASS', 'DIRT'],
+    /** Extra clearance beyond the road shoulder, metres. Verges stay bare. */
+    trackClearance: 2.0,
+    /** Metres the tuft origin is sunk, so blades start below the facet seam. */
+    sink: 0.06,
+    /**
+     * WIND — injected into the vertex shader, never computed per instance.
+     *
+     * Grass that does not move reads as plastic, and moving 2800 instances on
+     * the CPU would cost more than everything else in this file put together.
+     * See `src/render/wind.js`: the bend is proportional to height above the
+     * tuft's own base, so the roots stay welded to the ground.
+     */
+    wind: {
+      /** Sway coefficient. Tip displacement ≈ strength × height², so a 0.8m
+       *  blade leans about 14cm at full gust. */
+      strength: 0.22,
+      /** Radians per second of the main sway. */
+      speed: 1.5,
+      /** Metres per radian of phase across the ground — the gust wavelength. */
+      scale: 0.055,
+      /** Direction the wind blows, normalised on use. */
+      direction: { x: 0.82, z: 0.57 },
+    },
+  },
+
+  /**
+   * TRAILS — the ruts people wore into this place before you got here.
+   *
+   * The premise of the whole open world is that it is a real place somebody
+   * used to come to, and an untouched forest says the opposite. So there are
+   * faint worn routes from each landmark down to the nearest parkour, and a
+   * few between the landmarks themselves. They are drawn ENTIRELY as vertex
+   * colour on the terrain that already exists — no geometry, no draw call, no
+   * texture. See `world/trails.js` and `GROUND_PAINT.trail`.
+   *
+   * Subtlety is the whole brief. This is atmosphere, not a road network: a
+   * trail you can plan a route along is a road, and this world does not have
+   * roads outside the three parkours.
+   *
+   * A NOTE ON WIDTHS. The heightfield has a vertex every
+   * `terrainCellSize` (13m), so a two-metre tyre rut cannot be drawn here at
+   * all — it would fall between vertices and alias into nothing. What is
+   * achievable is a worn band a couple of vertices across, which from a car is
+   * what an old forest track looks like anyway.
+   */
+  trails: {
+    /** Metres either side of the centreline that are fully worn. */
+    coreWidth: 7,
+    /** …and where the wear has faded back into grass. */
+    edgeWidth: 17,
+    /** Waypoints per route. More = a wigglier path for the same wander. */
+    segments: 9,
+    /** Metres a route may wander off the straight line between its ends. */
+    wander: 90,
+    /**
+     * Routes between landmarks, as index pairs into `LANDMARK_DEFS`. Every
+     * landmark already gets a route down to the nearest parkour; these are the
+     * few that also connect to each other, and there are deliberately not many.
+     *
+     * Adjacent pairs only. The landmarks are 800m apart at best, so linking
+     * opposite ones draws a two-kilometre line across the entire map, and a
+     * trail long enough to navigate by is a road.
+     */
+    links: [
+      [2, 3],
+      [3, 4],
+      [0, 4],
+    ],
+    /**
+     * Short routes that leave a parkour, go into the trees, and stop.
+     *
+     * These do most of the storytelling, and they are the only trails the
+     * player is likely to meet, because they are where the player is. A rut
+     * that leads off the road and ends in nothing says somebody pulled over
+     * here far better than a path between two landmarks does — that one just
+     * says the map has a road network, which is the thing to avoid.
+     */
+    spurs: {
+      count: 11,
+      length: [110, 320],
+      /**
+       * How far from ANY parkour the far end has to finish, metres. All three
+       * parkours share one terrain, so a spur off one of them can quite easily
+       * land next to another — and a rut that leaves the road and rejoins it is
+       * a lay-by, which is a tidier and much less interesting story. Spurs that
+       * cannot clear this are simply not drawn.
+       */
+      clearEnd: 90,
+    },
+    /**
+     * Along-route patchiness: below this the route has grown over completely.
+     * Without it a trail is a stripe of uniform brown, which reads as painted.
+     */
+    fadeFrom: 0.3,
+    fadeTo: 0.62,
+    /** Grid cells per noise cycle for that patchiness. */
+    fadeScale: 0.0075,
+    /** Wear above which grass stops growing. A path with grass on it is a lawn. */
+    grassFreeAbove: 0.45,
+  },
   /** Seed for world generation — same seed, same world, every time. */
   seed: 0x7e4e17,
   /**

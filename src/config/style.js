@@ -114,7 +114,18 @@ export const THEMES = {
       /** Cheap hemisphere tint used by the vertex-lit material. */
       groundBounce: 0x4a5c33,
     },
-    ground: { base: 0x53703c, variantA: 0x455f33, variantB: 0x62804a, cliff: 0x6b6455 },
+    ground: {
+      base: 0x53703c,
+      variantA: 0x455f33,
+      variantB: 0x62804a,
+      cliff: 0x6b6455,
+      /** Bare earth, where the slope has worn the turf off it. */
+      dirt: 0x6b5537,
+      /** Wet ground down where the streams are. Darker than dirt, and greyer. */
+      mud: 0x453a2c,
+      /** Stones and sand in the soil — the pale speckle over bare ground. */
+      grit: 0x8c8272,
+    },
     road: {
       surface: 0x4a4a52,
       shoulder: 0x7d6f52,
@@ -130,6 +141,11 @@ export const THEMES = {
       canopyC: 0x26421f,
       bush: 0x395c2c,
       grassBlade: 0x5f8040,
+      /** Ferns and the low stuff under the canopy — deeper and bluer than turf,
+       *  because almost nothing down there is in direct sun. */
+      fern: 0x33552a,
+      /** Fallen leaves. The one warm colour on the forest floor. */
+      litter: 0x6a5330,
     },
     props: {
       rock: 0x6e6a60,
@@ -198,7 +214,15 @@ export const THEMES = {
       ambientIntensity: 2.2,
       groundBounce: 0x3e4a3a,
     },
-    ground: { base: 0x4a6440, variantA: 0x3d5638, variantB: 0x577049, cliff: 0x605a4e },
+    ground: {
+      base: 0x4a6440,
+      variantA: 0x3d5638,
+      variantB: 0x577049,
+      cliff: 0x605a4e,
+      dirt: 0x5e5140,
+      mud: 0x35302a,
+      grit: 0x7d7a70,
+    },
     ui: { accent: 0x54c8b0, accentAlt: 0xd8483a },
     grade: { lift: 0.03, gain: 1.12, saturation: 0.86, tint: 0xdce8f2 },
   },
@@ -217,7 +241,15 @@ export const THEMES = {
       ambientIntensity: 2.9,
       groundBounce: 0x141a14,
     },
-    ground: { base: 0x2c3d28, variantA: 0x243422, variantB: 0x36482e, cliff: 0x3a3a34 },
+    ground: {
+      base: 0x2c3d28,
+      variantA: 0x243422,
+      variantB: 0x36482e,
+      cliff: 0x3a3a34,
+      dirt: 0x332a1e,
+      mud: 0x221d17,
+      grit: 0x424036,
+    },
     road: {
       surface: 0x2a2a33,
       shoulder: 0x2a2418,
@@ -233,6 +265,8 @@ export const THEMES = {
       canopyC: 0x0e1a0c,
       bush: 0x16240f,
       grassBlade: 0x1f2c16,
+      fern: 0x121f0e,
+      litter: 0x2a2216,
     },
     ui: { ink: 0xdfe6f0, accent: 0xff2a2a, accentAlt: 0x2a6aff },
     grade: { lift: 0.035, gain: 1.2, saturation: 0.78, tint: 0xb8c6e0 },
@@ -252,13 +286,102 @@ export const THEMES = {
       ambientIntensity: 1.9,
       groundBounce: 0x14342c,
     },
-    ground: { base: 0x1b3a34, variantA: 0x15302c, variantB: 0x21453c, cliff: 0x2a3540 },
+    ground: {
+      base: 0x1b3a34,
+      variantA: 0x15302c,
+      variantB: 0x21453c,
+      cliff: 0x2a3540,
+      dirt: 0x21403a,
+      mud: 0x122622,
+      grit: 0x33564e,
+    },
     ui: { ink: 0x9fffe8, accent: 0x54c8b0, accentAlt: 0xff2a6a },
     grade: { lift: 0.03, gain: 1.12, saturation: 0.7, tint: 0x9fffe8 },
   },
 };
 
 export const DEFAULT_THEME = 'forest';
+
+// ---------------------------------------------------------------------------
+// GROUND PAINT
+// ---------------------------------------------------------------------------
+
+/**
+ * How the terrain's vertex colours are mixed out of the theme's ground palette.
+ *
+ * These are the *rules*; the colours themselves are per-theme above. The whole
+ * point is that ground reads as ground rather than as tinted noise: turf wears
+ * off as the land tips over, the low places go damp and dark, and there is grit
+ * in the soil everywhere. All of it is free — the terrain mesh already carries
+ * a colour attribute, so this costs nothing at runtime and nothing to draw.
+ *
+ * Thresholds that describe a *slope* are fractions of `TERRAIN_SHAPE.cliffSlope`
+ * rather than absolute numbers, so retuning what counts as a cliff drags the
+ * bare earth along with it instead of leaving a green cliff face behind.
+ */
+export const GROUND_PAINT = {
+  /** Broad patches of grass shade — grid cells per noise cycle. */
+  patchScale: 0.09,
+  /** Finer speckle mixed into the patch choice. */
+  speckScale: 0.61,
+
+  /**
+   * WEAR — where the turf gives up, on Terrain's 0..1 slope metric.
+   *
+   * Absolute, and NOT a fraction of `TERRAIN_SHAPE.cliffSlope`, which is the
+   * obvious thing to do and produces nothing at all. This valley is gentle:
+   * measured over the built world the median slope is 0.004, the 90th
+   * percentile is 0.056, the 99th is 0.099 and the steepest vertex anywhere is
+   * 0.43. `cliffSlope` is 0.55, so not one square metre of the map is a cliff
+   * and only 78 vertices out of 48,841 even classify as DIRT. Hang the paint
+   * off that number and the whole world stays green.
+   *
+   * At these values roughly a tenth of the ground shows real earth, all of it
+   * on the faces of the hills, which is where you would expect to find it.
+   */
+  wearStart: 0.018,
+  /** …and where it is bare earth and nothing else. */
+  wearFull: 0.12,
+  /**
+   * How far a noise field is allowed to move the wear line. Without it, bare
+   * earth appears along a perfect contour and the hillside looks like a
+   * topographic map.
+   */
+  wearNoise: 0.03,
+  wearNoiseScale: 0.17,
+
+  /** Metres above `TERRAIN_SHAPE.waterLevel` where the ground starts to damp. */
+  dampAbove: 9,
+  /** Metres below it by which the ground is entirely mud. */
+  dampBelow: 2,
+
+  /** Grit amplitude on turf — soil barely shows through grass. */
+  gritOnGrass: 0.06,
+  /** …and on bare earth, where it is most of what you are looking at. */
+  gritOnEarth: 0.2,
+  /** Grid cells per grit cycle. Near 1 = per-vertex, which is the finest the
+   *  heightfield can carry. */
+  gritScale: 1.37,
+
+  /** Higher ground catches more light — a free, cheap sense of relief. */
+  lift: { from: 10, range: 260, min: -0.1, max: 0.16 },
+
+  /**
+   * How a worn trail marks the ground it runs over. See `world/trails.js`;
+   * the SHAPE of the network is `OPEN_WORLD.trails`, this is only its colour.
+   *
+   * Toward the theme's own dirt, then darkened — a rut is bare earth AND it is
+   * in shadow, because it is a groove. Both, or it reads as a painted stripe.
+   */
+  trail: {
+    /** How far toward `ground.dirt` a fully worn vertex goes, 0..1. */
+    toDirt: 0.8,
+    /** …and how much darker on top of that. */
+    darken: 0.24,
+    /** Extra grit, because a used path is where the stones end up. */
+    grit: 0.12,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Resolution helpers

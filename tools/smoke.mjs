@@ -1178,6 +1178,766 @@ section('8. saved sound settings actually reach the mix');
 }
 
 // ---------------------------------------------------------------------------
+section('9. ground cover — grass that is actually there');
+
+// Grass is a pool that follows the camera, not scatter (see world/groundCover.js).
+// None of it can be seen from a screenshot in this environment, so everything
+// the eye would have caught is asserted numerically instead: that the blades
+// are ON the ground rather than floating over it, standing on the slope rather
+// than through it, and absent from the road, the cliffs and the steep ground.
+{
+  const { OPEN_WORLD } = await import('../src/config/gameplay.js');
+  const { GroundCover } = await import('../src/world/groundCover.js');
+  const GC = OPEN_WORLD.groundCover;
+  const cover = world.groundCover;
+  const terrain = world.terrain;
+
+  ok('the world grows ground cover', !!cover);
+  ok(
+    'the pool is the configured size',
+    cover.count === GC.bands.reduce((n, b) => n + b.count, 0),
+    `${cover.count} tufts`
+  );
+  ok('grass is no longer scattered', !world.scatter.root.getObjectByName('scatter:grass:0'));
+
+  /** Every visible tuft, decomposed out of the instance matrices. */
+  const m = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const _n9 = new THREE.Vector3();
+  //
+  // NOTE the scale is measured off the raw basis column rather than taken from
+  // `decompose`. A hidden instance is a zero matrix, and this three returns
+  // scale (1,1,1) with an identity rotation for anything whose determinant is
+  // zero — so decompose reports every hidden tuft as a full-size one sitting at
+  // the origin, and every assertion below quietly becomes a lie.
+  function visible(cvr) {
+    const out = [];
+    for (const g of cvr._groups) {
+      for (let i = 0; i < g.items.length; i++) {
+        g.mesh.getMatrixAt(i, m);
+        const e = m.elements;
+        if (Math.hypot(e[0], e[1], e[2]) < 1e-4) continue;
+        m.decompose(p, q, s);
+        out.push({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          scale: s.x,
+          up: up.set(0, 1, 0).applyQuaternion(q).clone(),
+          radius: g.band.radius,
+          size: g.items[i].size,
+        });
+      }
+    }
+    return out;
+  }
+
+  // Somewhere out in the forest, well clear of the tracks.
+  const spot = new THREE.Vector3(430, 0, -260);
+  spot.y = terrain.heightAt(spot.x, spot.z);
+  cover.update(1 / 60, spot);
+  let live = visible(cover);
+  ok('grass appears around the camera', live.length > 400, `${live.length} tufts visible`);
+
+  // ROOTED. A blade whose origin is not on the terrain is a floating card, and
+  // that is exactly what this replaced.
+  let worstDrop = 0;
+  let worstTilt = 0;
+  for (const t of live) {
+    worstDrop = Math.max(worstDrop, Math.abs(t.y + GC.sink - terrain.heightAt(t.x, t.z)));
+    terrain.normalAt(t.x, t.z, _n9);
+    worstTilt = Math.max(worstTilt, Math.abs(1 - t.up.dot(_n9)));
+  }
+  // A millimetre, not zero: instance matrices live in a Float32Array, so the
+  // position read back is the one the GPU will use rather than the one we
+  // composed. Anything a floating card would show up as is orders of
+  // magnitude above this.
+  ok('every tuft is rooted in the terrain', worstDrop < 1e-3, `worst gap ${worstDrop.toExponential(1)}m`);
+  ok(
+    'every tuft stands on the terrain normal',
+    worstTilt < 1e-6,
+    `worst deviation ${worstTilt.toExponential(1)}`
+  );
+
+  // The placement rules, all of which are invisible until they are wrong.
+  let onCliff = 0;
+  let tooSteep = 0;
+  let outsideBand = 0;
+  let unfaded = 0;
+  for (const t of live) {
+    const surface = terrain.surfaceAt(t.x, t.z);
+    if (!GC.surfaces.includes(surface)) onCliff++;
+    if (terrain.slopeAt(t.x, t.z) > GC.maxSlope) tooSteep++;
+    const d = Math.hypot(t.x - spot.x, t.z - spot.z);
+    if (d > t.radius) outsideBand++;
+    // Nothing pops in: a tuft arriving at the rim must still be almost nothing.
+    if (d > t.radius * 0.97 && t.scale > t.size * 0.15) unfaded++;
+  }
+  ok('no grass on cliffs or mud', onCliff === 0, `${onCliff} bad surfaces`);
+  ok('no grass on slopes it could not root in', tooSteep === 0, `${tooSteep} over ${GC.maxSlope}`);
+  ok('every tuft is inside its own band', outsideBand === 0, `${outsideBand} strays`);
+  ok('nothing arrives at full size', unfaded === 0, `${unfaded} would pop in`);
+
+  // ON THE ROAD IS THE ONE PLACE IT MUST NOT BE. Park on the start line of
+  // parkur 1 — the tightest case, because the camera is then surrounded by it.
+  const t1 = world.getTrack('track1');
+  const onTrack = new THREE.Vector3(t1.px[0], 0, t1.pz[0]);
+  onTrack.y = terrain.heightAt(onTrack.x, onTrack.z);
+  cover.update(1 / 60, onTrack);
+  live = visible(cover);
+  let onRoad = 0;
+  let nearest = Infinity;
+  const scratch = {};
+  for (const t of live) {
+    for (const tr of world._trackList) {
+      const query = tr.query(t.x, t.z, scratch);
+      if (!query) continue;
+      const edge = query.dist - query.halfWidth;
+      nearest = Math.min(nearest, edge);
+      if (edge < GC.trackClearance) onRoad++;
+    }
+  }
+  ok('grass never grows on the racing surface', onRoad === 0, `${onRoad} tufts on tarmac`);
+  ok(
+    'the verge is bare for the configured clearance',
+    nearest >= GC.trackClearance,
+    `nearest blade ${nearest.toFixed(2)}m past the edge, clearance ${GC.trackClearance}m`
+  );
+  ok('there is still grass beside the track', live.length > 200, `${live.length} tufts`);
+
+  // Drive, do not teleport: the pool must follow without changing size and
+  // without allocating. This is the whole reason it is a pool.
+  const before = cover.count;
+  const walk = onTrack.clone();
+  for (let i = 0; i < 120; i++) {
+    walk.x += 0.9;
+    walk.z += 0.4;
+    walk.y = terrain.heightAt(walk.x, walk.z);
+    cover.update(1 / 60, walk);
+  }
+  live = visible(cover);
+  let strays = 0;
+  for (const t of live) if (Math.hypot(t.x - walk.x, t.z - walk.z) > t.radius) strays++;
+  ok('driving recycles rather than reallocates', cover.count === before, `${cover.count} tufts`);
+  ok('the pool stays centred on the camera', strays === 0, `${strays} left behind`);
+
+  // Determinism. Same seed and same camera path, twice, matrix for matrix.
+  {
+    const mk = () =>
+      new GroundCover({
+        terrain,
+        materials,
+        theme,
+        seed: 0x7e4e17 ^ 0x6c0f,
+        avoid: world._trackAvoidance(GC.trackClearance),
+      }).build();
+    const a = mk();
+    const b = mk();
+    const path = [spot, new THREE.Vector3(spot.x + 30, 0, spot.z + 12), onTrack];
+    for (const point of path) {
+      a.update(1 / 60, point);
+      b.update(1 / 60, point);
+    }
+    const A = visible(a);
+    const B = visible(b);
+    let same = A.length === B.length && A.length > 0;
+    for (let i = 0; same && i < A.length; i++) {
+      same = A[i].x === B[i].x && A[i].y === B[i].y && A[i].scale === B[i].scale;
+    }
+    ok('same seed, same grass', same, `${A.length} tufts compared`);
+    a.dispose();
+    b.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+section('10. the wind is in the shader, and only in the grass');
+
+// Vertex wind is `onBeforeCompile` surgery (src/render/wind.js) and there is no
+// GL context here to compile it. What CAN be checked is the two ways this fails
+// silently: the injection missing its anchor, and the material sharing a
+// compiled program with something that must not wave.
+{
+  const { MaterialLibrary } = await import('../src/render/materials.js');
+  const lib = new MaterialLibrary(theme, preset);
+  const grass = lib.get('grass');
+  const foliage = lib.get('foliage');
+
+  // Stand-in for three's shader object, carrying the anchors both passes need.
+  const fake = () => ({
+    uniforms: {},
+    vertexShader: 'void main() {\n#include <begin_vertex>\n#include <fog_vertex>\n}',
+    fragmentShader: 'void main() {\n#include <map_fragment>\n}',
+  });
+
+  const shader = fake();
+  grass.onBeforeCompile(shader, null);
+  ok('the wind reaches the vertex shader', /transformed\.xz \+= uWindDir/.test(shader.vertexShader));
+  ok('…anchored to begin_vertex, before projection', shader.vertexShader.indexOf('uWindDir *') < shader.vertexShader.indexOf('#include <fog_vertex>'));
+  ok('…and it still runs the PSX snap', /uSnapResolution/.test(shader.vertexShader));
+  for (const u of ['uWindTime', 'uWindStrength', 'uWindScale', 'uWindDir']) {
+    ok(`uniform ${u} is bound`, !!shader.uniforms[u]);
+  }
+  // The roots. `transformed.y` squared is what welds the base of a blade to the
+  // ground; drop it and the whole tuft slides sideways in the wind.
+  ok('the bend is zero at the root', /windBend \* windBend/.test(shader.vertexShader));
+
+  // Two MeshLambertMaterials with the same parameters share a compiled program.
+  // If the grass reported the plain PSX cache key, three would hand the terrain
+  // the wind shader and the ground itself would start waving.
+  ok(
+    'the grass does not share a program with the still world',
+    grass.customProgramCacheKey() !== foliage.customProgramCacheKey(),
+    `${grass.customProgramCacheKey()} vs ${foliage.customProgramCacheKey()}`
+  );
+
+  const plain = fake();
+  foliage.onBeforeCompile(plain, null);
+  ok('nothing else got the wind', !/uWindDir/.test(plain.vertexShader));
+
+  // The phase is a number the world drives; a stuck one is grass frozen mid-gust.
+  lib.setWindTime(4.25);
+  ok('the world can advance the wind', lib._wind.uWindTime.value === 4.25);
+  lib.configureWind({ strength: 0.3, scale: 0.06, direction: { x: 3, z: 4 } });
+  ok(
+    'the wind direction is normalised',
+    Math.abs(lib._wind.uWindDir.value.length() - 1) < 1e-6,
+    `(${lib._wind.uWindDir.value.x.toFixed(2)}, ${lib._wind.uWindDir.value.y.toFixed(2)})`
+  );
+  lib.dispose();
+}
+
+// ---------------------------------------------------------------------------
+section('11. the ground looks like ground');
+
+// Terrain colour is baked into the mesh's vertex colours, which is the one
+// thing about the look that a headless run can read directly. So read it: pull
+// every vertex out of the built chunks and check the three claims the palette
+// makes — turf wears off as the land tips over, everything low goes dark and
+// damp, and there is grit in all of it.
+{
+  const { GROUND_PAINT } = await import('../src/config/style.js');
+  const { TERRAIN_SHAPE } = await import('../src/world/terrain.js');
+  const terrain = world.terrain;
+
+  for (const name of Object.keys(THEMES)) {
+    const g = resolveTheme(name).ground;
+    ok(
+      `theme "${name}" has earth to paint with`,
+      [g.dirt, g.mud, g.grit].every((c) => typeof c === 'number'),
+      `dirt ${g.dirt?.toString(16)} mud ${g.mud?.toString(16)} grit ${g.grit?.toString(16)}`
+    );
+  }
+
+  /** Greenness: how much a colour leans green against its own red and blue. */
+  const green = (r, gg, b) => gg - (r + b) / 2;
+  const luma = (r, gg, b) => 0.299 * r + 0.587 * gg + 0.114 * b;
+
+  const all = [];
+  for (const chunk of terrain.chunks) {
+    const pos = chunk.geometry.getAttribute('position');
+    const col = chunk.geometry.getAttribute('color');
+    for (let i = 0; i < pos.count; i += 11) {
+      const x = pos.getX(i);
+      const h = pos.getY(i);
+      const z = pos.getZ(i);
+      all.push({
+        slope: terrain.slopeAt(x, z),
+        h,
+        green: green(col.getX(i), col.getY(i), col.getZ(i)),
+        luma: luma(col.getX(i), col.getY(i), col.getZ(i)),
+      });
+    }
+  }
+  const mean = (rows, key) => rows.reduce((s, r) => s + r[key], 0) / Math.max(1, rows.length);
+
+  // Percentiles, not thresholds. This valley is far gentler than `cliffSlope`
+  // assumes — median slope 0.004, steepest vertex 0.43 — so "steep" has to mean
+  // "steep for this world" or the bucket comes back empty and the assertion
+  // passes without ever having looked at anything.
+  const bySlope = [...all].sort((a, b) => a.slope - b.slope);
+  const flat = bySlope.slice(0, Math.floor(bySlope.length * 0.5));
+  const steep = bySlope.slice(Math.floor(bySlope.length * 0.98));
+  ok('there is flat ground and steep ground to compare', flat.length > 200 && steep.length > 40,
+    `${flat.length} flat (to slope ${flat.at(-1).slope.toFixed(3)}), ${steep.length} steep (from ${steep[0].slope.toFixed(3)})`);
+  ok(
+    'turf wears off as the land tips over',
+    mean(steep, 'green') < mean(flat, 'green') * 0.6,
+    `greenness ${mean(flat, 'green').toFixed(4)} flat vs ${mean(steep, 'green').toFixed(4)} steep`
+  );
+
+  const low = all.filter((r) => r.h < TERRAIN_SHAPE.waterLevel - GROUND_PAINT.dampBelow);
+  const high = all.filter((r) => r.h > TERRAIN_SHAPE.waterLevel + GROUND_PAINT.dampAbove + 30);
+  ok('there is low ground and high ground to compare', low.length > 20 && high.length > 200,
+    `${low.length} low, ${high.length} high`);
+  ok(
+    'the low ground is dark and damp',
+    mean(low, 'luma') < mean(high, 'luma') * 0.75,
+    `luma ${mean(high, 'luma').toFixed(4)} high vs ${mean(low, 'luma').toFixed(4)} low`
+  );
+
+  // Variation. A palette that has stopped mottling still passes every average
+  // above, because the average is all it produces.
+  const mu = mean(all, 'luma');
+  const sd = Math.sqrt(all.reduce((s, r) => s + (r.luma - mu) ** 2, 0) / all.length);
+  ok('the ground is not one flat colour', sd / mu > 0.12, `luma spread ${(100 * sd / mu).toFixed(1)}%`);
+
+  // COLOURS COME FROM THE THEME, NOT FROM THIS FILE. Paint a slope that is
+  // steep enough and high enough to be nothing but bare earth, twice, with the
+  // theme's dirt colour swapped underneath. A hard-coded brown would not move.
+  {
+    const { Terrain } = await import('../src/world/terrain.js');
+    const mk = (dirtHex) => {
+      const t = JSON.parse(JSON.stringify(resolveTheme('forest')));
+      t.ground.dirt = dirtHex;
+      const terr = new Terrain({ resolution: 8, cellSize: 13, seed: 7 }).generate();
+      // A uniform 40-degree ramp, well above the water line.
+      for (let j = 0; j < terr.gridSize; j++) {
+        for (let i = 0; i < terr.gridSize; i++) terr.heights[j * terr.gridSize + i] = 40 + i * 11;
+      }
+      terr._classifySurfaces();
+      terr.buildMesh(materials, t, 8);
+      const col = terr.chunks[0].geometry.getAttribute('color');
+      return [col.getX(12), col.getY(12), col.getZ(12)];
+    };
+    const brown = mk(0x6b5537);
+    const magenta = mk(0xff00ff);
+    ok(
+      "the earth is the theme's earth",
+      Math.abs(brown[0] - magenta[0]) > 0.05 && Math.abs(brown[2] - magenta[2]) > 0.05,
+      `${brown.map((v) => v.toFixed(3)).join(',')} vs ${magenta.map((v) => v.toFixed(3)).join(',')}`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+section('12. somebody was here first');
+
+// Worn trails are vertex-colour darkening on the terrain that already exists —
+// no mesh, no decal, no texture (world/trails.js). Which means the evidence
+// that they worked is in the same colour buffer as everything else, and a
+// headless run can check all of it: where the routes go, how much of the world
+// they touch, and whether the ground under them actually changed.
+{
+  const { OPEN_WORLD } = await import('../src/config/gameplay.js');
+  const { Trails } = await import('../src/world/trails.js');
+  const { LANDMARK_DEFS } = await import('../src/world/world.js');
+  const { TERRAIN_SHAPE } = await import('../src/world/terrain.js');
+  const { GROUND_PAINT: GP } = await import('../src/config/style.js');
+  const T = OPEN_WORLD.trails;
+  const trails = world.trails;
+  const terrain = world.terrain;
+
+  ok('the world has worn routes in it', !!trails && trails.routes.length > 0,
+    `${trails?.routes.length} routes, ${trails?.segments.length} segments`);
+  ok(
+    'one route per landmark, plus the links, plus the spurs',
+    trails.routes.length <= LANDMARK_DEFS.length + T.links.length + T.spurs.count &&
+      trails.routes.length >= LANDMARK_DEFS.length + T.links.length,
+    `${trails.routes.length} of at most ${LANDMARK_DEFS.length + T.links.length + T.spurs.count}`
+  );
+  ok('a trail is not geometry', !world.root.getObjectByName('trails') && typeof terrain.painter === 'function');
+
+  /** Distance from a point to the nearest parkour centreline sample. */
+  const toTrack = (p) => {
+    let best = Infinity;
+    for (const tk of world._trackList) {
+      for (let k = 0; k < tk.count; k++) {
+        best = Math.min(best, Math.hypot(tk.px[k] - p.x, tk.pz[k] - p.z));
+      }
+    }
+    return best;
+  };
+
+  // The first six routes are the landmark ones, in `LANDMARK_DEFS` order.
+  const span = terrain.halfSpan;
+  let atLandmark = 0;
+  let atTrack = 0;
+  for (let i = 0; i < LANDMARK_DEFS.length; i++) {
+    const d = LANDMARK_DEFS[i];
+    const route = trails.routes[i];
+    const want = { x: Math.cos(d.angle) * span * d.dist, z: Math.sin(d.angle) * span * d.dist };
+    if (Math.hypot(route[0].x - want.x, route[0].z - want.z) < 0.001) atLandmark++;
+    if (toTrack(route.at(-1)) < 0.001) atTrack++;
+  }
+  ok('every landmark route starts at its landmark', atLandmark === LANDMARK_DEFS.length,
+    `${atLandmark}/${LANDMARK_DEFS.length}`);
+  ok('…and ends on a parkour', atTrack === LANDMARK_DEFS.length, `${atTrack}/${LANDMARK_DEFS.length}`);
+
+  // A route that goes from A to B in a straight line is a survey line, not a
+  // path somebody wore. Every one of them has to leave the straight line.
+  let straightest = Infinity;
+  for (const route of trails.routes) {
+    const a = route[0];
+    const b = route.at(-1);
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    let off = 0;
+    for (const p of route) off = Math.max(off, pointLineDistance(p, a, b));
+    straightest = Math.min(straightest, off / Math.max(1, len));
+  }
+  ok('no route is a ruler line', straightest > 0.02, `least wander ${(100 * straightest).toFixed(1)}% of its length`);
+
+  // The spurs. These leave a parkour and end in the trees; a spur that comes
+  // back to the road is a lay-by, which is a different and much tidier story.
+  const spurs = trails.routes.slice(LANDMARK_DEFS.length + T.links.length);
+  let leaveRoad = 0;
+  for (const s of spurs) if (toTrack(s[0]) < 0.001 && toTrack(s.at(-1)) > 80) leaveRoad++;
+  ok('the spurs leave the road and stop in the trees', spurs.length > 0 && leaveRoad === spurs.length,
+    `${leaveRoad}/${spurs.length}`);
+
+  // SUBTLETY IS THE BRIEF. Atmosphere, not a road network.
+  const luma = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+  const green = (r, g, b) => g - (r + b) / 2;
+  let vertices = 0;
+  let touched = 0;
+  const wornRows = [];
+  const cleanRows = [];
+  for (const chunk of terrain.chunks) {
+    const pos = chunk.geometry.getAttribute('position');
+    const col = chunk.geometry.getAttribute('color');
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const h = pos.getY(i);
+      const z = pos.getZ(i);
+      vertices++;
+      const s = trails.strengthAt(x, z);
+      if (s > 0.5) touched++;
+      // Compare on dry ground only — above where the damp layer stops. It
+      // darkens the low places on its own, and the trails do not run uniformly
+      // across the height range, so mixing the two measures the wrong thing.
+      if (h < TERRAIN_SHAPE.waterLevel + GP.dampAbove) continue;
+      const rec = {
+        luma: luma(col.getX(i), col.getY(i), col.getZ(i)),
+        green: green(col.getX(i), col.getY(i), col.getZ(i)),
+      };
+      if (s > 0.6) wornRows.push(rec);
+      else if (s === 0) cleanRows.push(rec);
+    }
+  }
+  const share = (100 * touched) / vertices;
+  ok('the world is not paved', share < 4, `${share.toFixed(2)}% of the ground is worn`);
+  ok('…but it is marked', share > 0.2 && wornRows.length > 30,
+    `${touched} worn vertices, ${wornRows.length} of them on dry ground`);
+
+  const mean = (rows, key) => rows.reduce((s, r) => s + r[key], 0) / Math.max(1, rows.length);
+  ok(
+    'a worn route is darker than the ground beside it',
+    mean(wornRows, 'luma') < mean(cleanRows, 'luma') * 0.9,
+    `luma ${mean(cleanRows, 'luma').toFixed(4)} clean vs ${mean(wornRows, 'luma').toFixed(4)} worn`
+  );
+  ok(
+    '…and browner',
+    mean(wornRows, 'green') < mean(cleanRows, 'green') * 0.5,
+    `greenness ${mean(cleanRows, 'green').toFixed(4)} clean vs ${mean(wornRows, 'green').toFixed(4)} worn`
+  );
+
+  // Grass does not grow on a path. The ground cover shares the trail field.
+  {
+    let onPath = 0;
+    const probe = new THREE.Vector3();
+    const mid = trails.routes[0][Math.floor(trails.routes[0].length / 2)];
+    probe.set(mid.x, terrain.heightAt(mid.x, mid.z), mid.z);
+    world.groundCover.update(1 / 60, probe);
+    const mm = new THREE.Matrix4();
+    for (const g of world.groundCover._groups) {
+      for (let i = 0; i < g.items.length; i++) {
+        g.mesh.getMatrixAt(i, mm);
+        const e = mm.elements;
+        if (Math.hypot(e[0], e[1], e[2]) < 1e-4) continue;
+        if (trails.strengthAt(e[12], e[14]) > T.grassFreeAbove) onPath++;
+      }
+    }
+    ok('grass does not grow on a worn path', onPath === 0, `${onPath} tufts on the trail`);
+  }
+
+  // Deterministic from the seed, like everything else that generates the world.
+  {
+    const marks = LANDMARK_DEFS.map((d) => ({
+      x: Math.cos(d.angle) * span * d.dist,
+      z: Math.sin(d.angle) * span * d.dist,
+    }));
+    const mk = (seed) => new Trails({ halfSpan: span, landmarks: marks, tracks: world._trackList, seed });
+    const a = mk(0x7e4e17);
+    const b = mk(0x7e4e17);
+    const c = mk(0x51ee11);
+    const same = JSON.stringify(a.routes) === JSON.stringify(b.routes);
+    const different = JSON.stringify(a.routes) !== JSON.stringify(c.routes);
+    ok('same seed, same trails', same, `${a.routes.length} routes compared`);
+    ok('…and a different seed wears the ground somewhere else', different);
+  }
+}
+
+// ---------------------------------------------------------------------------
+section('13. there is something growing under the trees');
+
+// Ferns, undergrowth and leaf litter go through the same `Scatter` as the
+// forest, so what is worth checking is the part that is NOT shared: that they
+// land in the tree stands rather than evenly across the map, that none of them
+// is solid, and that the litter is not floating.
+{
+  const { OPEN_WORLD } = await import('../src/config/gameplay.js');
+  const { SCATTER_RULES } = await import('../src/world/scatter.js');
+  const { buildVariants } = await import('../src/world/props.js');
+  const D = OPEN_WORLD.scatterDensity;
+  const terrain = world.terrain;
+
+  /** Every placed instance of a scatter kind, as world positions. */
+  const positionsOf = (kind) => {
+    const out = [];
+    const m = new THREE.Matrix4();
+    for (const mesh of world.scatter._meshes) {
+      if (!mesh.name.startsWith(`scatter:${kind}:`)) continue;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m);
+        out.push({ x: m.elements[12], y: m.elements[13], z: m.elements[14] });
+      }
+    }
+    return out;
+  };
+
+  const ferns = positionsOf('fern');
+  const under = positionsOf('undergrowth');
+  const litter = positionsOf('litter');
+  const pines = positionsOf('pine');
+
+  ok('ferns were planted', ferns.length > D.ferns * 0.4, `${ferns.length} of ${D.ferns} attempted`);
+  ok('undergrowth was planted', under.length > D.undergrowth * 0.4, `${under.length} of ${D.undergrowth}`);
+  ok('leaf litter was scattered', litter.length > D.litter * 0.4, `${litter.length} of ${D.litter}`);
+
+  // CLUSTERED AROUND THE TREE STANDS. The mechanism is that the understorey
+  // samples the pines' own clumping noise at the pines' own frequency, so they
+  // clump in the same places — nothing looks up where a tree is. Measure it:
+  // an understorey plant should be markedly nearer a pine than a fair coin
+  // toss on the same ground would put it.
+  const nearestPine = (p) => {
+    let best = Infinity;
+    for (let i = 0; i < pines.length; i++) {
+      const d = (pines[i].x - p.x) ** 2 + (pines[i].z - p.z) ** 2;
+      if (d < best) best = d;
+    }
+    return Math.sqrt(best);
+  };
+  const median = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const sample = (arr, n) => {
+    const out = [];
+    const stride = Math.max(1, Math.floor(arr.length / n));
+    for (let i = 0; i < arr.length && out.length < n; i += stride) out.push(arr[i]);
+    return out;
+  };
+
+  // The control: points spread over the same disc the ferns were offered.
+  const control = [];
+  for (let i = 0; control.length < 250 && i < 4000; i++) {
+    const a = i * 2.399963229728653;
+    const r = terrain.halfSpan * 0.95 * Math.sqrt((i % 997) / 997);
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    if (terrain.contains(x, z)) control.push({ x, z });
+  }
+  const fernNear = median(sample(ferns, 250).map(nearestPine));
+  const anyNear = median(control.map(nearestPine));
+  ok(
+    'the understorey grows where the trees are',
+    fernNear < anyNear * 0.7,
+    `median fern-to-pine ${fernNear.toFixed(1)}m vs ${anyNear.toFixed(1)}m for open ground`
+  );
+  ok(
+    '…and so does the litter',
+    median(sample(litter, 250).map(nearestPine)) < anyNear * 0.7,
+    `${median(sample(litter, 250).map(nearestPine)).toFixed(1)}m`
+  );
+
+  // The hard version of the same claim: NOTHING is out on its own. Measured
+  // against every trunk the predicate was built from, not just the pines.
+  {
+    const trunks = world.scatter.colliders.filter(
+      (c) => c.kind === 'pine' || c.kind === 'broadleaf'
+    );
+    const nearestTrunk = (p) => {
+      let best = Infinity;
+      for (let i = 0; i < trunks.length; i++) {
+        const d = (trunks[i].x - p.x) ** 2 + (trunks[i].z - p.z) ** 2;
+        if (d < best) best = d;
+      }
+      return Math.sqrt(best);
+    };
+    let stray = 0;
+    let worst = 0;
+    for (const p of [...sample(ferns, 200), ...sample(under, 200), ...sample(litter, 200)]) {
+      const d = nearestTrunk(p);
+      worst = Math.max(worst, d);
+      if (d > OPEN_WORLD.understoreyRadius + 0.001) stray++;
+    }
+    ok(
+      'no understorey plant grows out in the open',
+      stray === 0,
+      `furthest from a trunk ${worst.toFixed(2)}m, limit ${OPEN_WORLD.understoreyRadius}m`
+    );
+  }
+
+  // You drive through undergrowth. None of it may be solid, and none of it may
+  // end up in the collision grid or in the fellable set.
+  const solid = world.scatter.colliders.filter((c) =>
+    ['fern', 'undergrowth', 'litter'].includes(c.kind)
+  );
+  ok('you can drive straight through all of it', solid.length === 0, `${solid.length} colliders`);
+
+  // Off the racing surface, same rule as the forest.
+  let onRoad = 0;
+  const scratch = {};
+  for (const p of [...sample(ferns, 200), ...sample(litter, 200), ...sample(under, 200)]) {
+    for (const tk of world._trackList) {
+      const q = tk.query(p.x, p.z, scratch);
+      if (q && q.dist < q.halfWidth) onRoad++;
+    }
+  }
+  ok('none of it grows on the road', onRoad === 0, `${onRoad} on tarmac`);
+
+  // LITTER MUST NOT FLOAT, AND MUST NOT SINK. `Scatter` drops every prop 8cm
+  // and never tilts it to the ground, so the geometry has to start above that
+  // by itself — and by little enough that it still reads as lying down.
+  {
+    const variants = buildVariants('litter', theme, 1234, SCATTER_RULES.litter.variants);
+    let lowest = Infinity;
+    let highest = -Infinity;
+    for (const v of variants) {
+      v.geometry.computeBoundingBox();
+      lowest = Math.min(lowest, v.geometry.boundingBox.min.y);
+      highest = Math.max(highest, v.geometry.boundingBox.max.y);
+    }
+    const sink = 0.08;
+    ok(
+      'leaf litter clears the prop sink',
+      lowest * SCATTER_RULES.litter.scale[0] > sink,
+      `lowest piece ${(lowest * SCATTER_RULES.litter.scale[0]).toFixed(3)}m vs ${sink}m sink`
+    );
+    ok(
+      '…and is still lying on the floor',
+      highest * SCATTER_RULES.litter.scale[1] - sink < 0.35,
+      `highest piece ${(highest * SCATTER_RULES.litter.scale[1] - sink).toFixed(3)}m above ground`
+    );
+  }
+
+  // Colours come from the theme. Every theme has to have somewhere to get them.
+  for (const name of Object.keys(THEMES)) {
+    const f = resolveTheme(name).foliage;
+    ok(`theme "${name}" has an understorey palette`,
+      typeof f.fern === 'number' && typeof f.litter === 'number',
+      `fern ${f.fern?.toString(16)} litter ${f.litter?.toString(16)}`);
+  }
+  // …and the night one has to be its OWN, not forest's inherited daylight green.
+  const dayFern = resolveTheme('forest').foliage.fern;
+  const nightFern = resolveTheme('night').foliage.fern;
+  ok('the night forest floor is not lit like the day one', dayFern !== nightFern,
+    `${dayFern.toString(16)} vs ${nightFern.toString(16)}`);
+}
+
+// ---------------------------------------------------------------------------
+section('14. the trees got a nudge, and still work');
+
+// Tree geometry is not only scenery: `collider.canopyY` is where `Trees`
+// cuts a felled tree into the thing the player wears, and the collider is the
+// identity of a fellable trunk. Adding roots, tiers and a spire is exactly the
+// kind of change that quietly breaks felling, so everything the disguise
+// depends on is asserted against the geometry itself.
+{
+  const { buildVariants } = await import('../src/world/props.js');
+  const { SCATTER_RULES } = await import('../src/world/scatter.js');
+  const { Trees } = await import('../src/world/trees.js');
+  const { TREES } = await import('../src/config/gameplay.js');
+
+  // A pine is multiplied by ~2600 and a broadleaf by ~1200. The budget is the
+  // art direction, not a limitation, and this is the guard on it.
+  const BUDGET = { pine: 60, broadleaf: 56, dead: 68 };
+
+  for (const kind of ['pine', 'broadleaf', 'dead']) {
+    const variants = buildVariants(kind, theme, 4242, SCATTER_RULES[kind].variants);
+    let worstTris = 0;
+    let noTrunk = 0;
+    let noCanopy = 0;
+    let outsideHitbox = 0;
+    let coversBuilt = 0;
+
+    for (const v of variants) {
+      const pos = v.geometry.getAttribute('position');
+      worstTris = Math.max(worstTris, pos.count / 3);
+      const cut = v.canopyY;
+
+      // Split the tree the way `Trees#_canopyGeometry` splits it, and check
+      // both halves exist. A tree with nothing under the cut has no trunk; one
+      // with nothing over it can never be worn.
+      //
+      // The BASE region is stricter than "below the cut": a broadleaf's lowest
+      // foliage legitimately dips under its own `canopyY`, and foliage is
+      // *supposed* to overhang the hitbox — you drive under branches. What may
+      // never overhang is the bit at the bottom you would actually hit, which
+      // is where the new roots are.
+      let below = 0;
+      let above = 0;
+      let baseRadius = 0;
+      for (let t = 0; t < pos.count; t += 3) {
+        const cy = (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3;
+        if (cy < cut) below++;
+        else above++;
+        if (cy >= cut * 0.5) continue;
+        for (let k = 0; k < 3; k++) {
+          baseRadius = Math.max(baseRadius, Math.hypot(pos.getX(t + k), pos.getZ(t + k)));
+        }
+      }
+      if (below === 0) noTrunk++;
+      if (above === 0) noCanopy++;
+      if (baseRadius > v.collider.radius + 1e-6) outsideHitbox++;
+
+      // And the cover itself, built by the real code path.
+      const src = { geometry: v.geometry, material: null, userData: {} };
+      const cover = new Trees()._canopyGeometry(src, { canopyY: v.canopyY, instance: 0 });
+      if (cover && cover.radius > 0 && cover.height > 0) coversBuilt++;
+    }
+
+    ok(`a ${kind} is still cheap`, worstTris <= BUDGET[kind], `${worstTris} triangles, budget ${BUDGET[kind]}`);
+    ok(`every ${kind} variant has a trunk`, noTrunk === 0);
+    ok(`every ${kind} variant has a canopy above the cut`, noCanopy === 0);
+    ok(`the base of a ${kind} fits inside its own hitbox`, outsideHitbox === 0, `${outsideHitbox} variants`);
+
+    // `dead` is deliberately absent. A felled dead tree has never produced a
+    // wearable cover — its trunk is one cylinder spanning the whole height, so
+    // `_canopyGeometry`'s first pass takes `base` from the ground and the
+    // `wornCanopy` ceiling lands below the cut, leaving an empty band. That is
+    // a pre-existing bug in the interaction between the prop and `TREES`
+    // (PROGRESS bug 20), verified present before these tree changes, and its
+    // fix belongs in `trees.js`.
+    if (kind !== 'dead') {
+      ok(
+        `every ${kind} can still be worn`,
+        coversBuilt === variants.length,
+        `${coversBuilt}/${variants.length} covers built`
+      );
+    }
+  }
+
+  // The world's own trees, as `Scatter` produced them: every fellable collider
+  // has to carry a usable `canopyY`, because that is what identifies it.
+  const fellable = world.scatter.colliders.filter((c) => TREES.fellable.includes(c.kind));
+  const broken = fellable.filter(
+    (c) => !(c.canopyY > 0) || !(c.radius > 0) || !(c.height > 0) || !c.baseMatrix || !(c.scale > 0)
+  );
+  ok('every fellable tree in the world knows where its canopy starts', broken.length === 0,
+    `${fellable.length} trees, ${broken.length} broken`);
+  ok('…and they are all inside the collision grid', world.collision.count > fellable.length,
+    `${world.collision.count} colliders, ${fellable.length} of them trees`);
+}
+
+function pointLineDistance(p, a, b) {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  return Math.abs((p.x - a.x) * dz - (p.z - a.z) * dx) / len;
+}
+
+// ---------------------------------------------------------------------------
 console.log(
   `\n${failures === 0 ? '\x1b[32m' : '\x1b[31m'}${checks - failures}/${checks} checks passed\x1b[0m\n`
 );

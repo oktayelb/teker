@@ -41,8 +41,25 @@ export const SCATTER_RULES = {
   dead: { variants: 3, scale: [0.8, 1.2], maxSlope: 0.5, surfaces: ['GRASS', 'DIRT', 'MUD'], clumping: 0.25, clumpScale: 0.005, tintJitter: 0.06, lean: 0.12 },
   rock: { variants: 6, scale: [0.7, 1.6], maxSlope: 0.8, surfaces: ['GRASS', 'DIRT', 'MUD'], clumping: 0.45, clumpScale: 0.004, tintJitter: 0.08, lean: 0.14 },
   bush: { variants: 5, scale: [0.7, 1.5], maxSlope: 0.5, surfaces: ['GRASS', 'DIRT'], clumping: 0.5, clumpScale: 0.0045, tintJitter: 0.14, lean: 0.08 },
-  grass: { variants: 4, scale: [0.7, 1.6], maxSlope: 0.45, surfaces: ['GRASS'], clumping: 0.35, clumpScale: 0.006, tintJitter: 0.18, lean: 0.1 },
-  log: { variants: 3, scale: [0.8, 1.2], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.2, clumpScale: 0.006, tintJitter: 0.08, lean: 0.06 },
+
+  // UNDERSTOREY. These three sit UNDER the trees rather than beside them, and
+  // the clumping field cannot express that on its own: `clumpScale` 0.0022 has
+  // features 450m across, so matching the pine's frequency correlates the
+  // understorey with the broad regions the forest is dense in, not with any
+  // actual tree. What puts a fern at the foot of a trunk is the `avoid`
+  // predicate `World#_scatterForest` hands in — see `_treeProximity` — which
+  // rejects anywhere further than `OPEN_WORLD.understoreyRadius` from a trunk
+  // that has already been planted. Clumping is left low here on purpose,
+  // because two rejection filters stacked on top of each other mostly reject.
+  fern: { variants: 5, scale: [0.75, 1.6], maxSlope: 0.4, surfaces: ['GRASS', 'DIRT'], clumping: 0.25, clumpScale: 0.0022, tintJitter: 0.16, lean: 0.1 },
+  undergrowth: { variants: 5, scale: [0.8, 1.7], maxSlope: 0.42, surfaces: ['GRASS', 'DIRT'], clumping: 0.25, clumpScale: 0.0022, tintJitter: 0.18, lean: 0.09 },
+  // Litter lies on the floor, so its lean is nearly nothing — a tilted patch of
+  // leaves puts one edge in the air. See `createLitter` for the other half.
+  litter: { variants: 6, scale: [0.85, 1.45], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.2, clumpScale: 0.0022, tintJitter: 0.15, lean: 0.02 },
+
+  // There is no `grass` rule on purpose. Ground cover is a camera-following
+  // pool, not scatter — see `world/groundCover.js`.
+  log:{ variants: 3, scale: [0.8, 1.2], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.2, clumpScale: 0.006, tintJitter: 0.08, lean: 0.06 },
   sign: { variants: 2, scale: [0.9, 1.1], maxSlope: 0.25, surfaces: ['GRASS', 'DIRT'], clumping: 0.0, clumpScale: 0.01, tintJitter: 0.03, lean: 0.02 },
   // Somebody walked out here to put these up, so they cluster near where a
   // person could get to rather than scattering evenly through the trees.

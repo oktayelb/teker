@@ -88,6 +88,38 @@ how to tune it and where to build the next act.
   (`src/render/lightPool.js`) so the count never changes and three never
   recompiles materials mid-scene.
 
+- **P17** — Ground cover. Grass is no longer scattered; it is a camera-following
+  pool in two bands (`src/world/groundCover.js`, `OPEN_WORLD.groundCover`),
+  rooted with `terrain.heightAt` and stood up on `terrain.normalAt`. It bends
+  in the vertex shader (`src/render/wind.js`), injected at `begin_vertex` so it
+  cannot fight the PSX snap at `fog_vertex`. 2800 tufts, 29k triangles, zero
+  allocation after `build()`.
+
+- **P18** — Dirt. `buildPalette` now layers turf → wear → damp → grit into the
+  terrain's vertex colours, with the colours per theme (`ground.dirt/mud/grit`)
+  and the rules in `GROUND_PAINT` (`style.js`). The wear thresholds are
+  ABSOLUTE, not fractions of `cliffSlope` — see bug 19.
+
+- **P19** — Trails. Worn routes from every landmark to the nearest parkour, a
+  few links between adjacent landmarks, and eleven spurs that leave a parkour
+  and stop in the trees. Drawn entirely through the new `Terrain#painter` hook
+  (the colour-space sibling of `shaper`) — no mesh, no decal, no texture. The
+  ground cover shares the same field, so grass does not grow on a path.
+  `world/trails.js`, `OPEN_WORLD.trails`, `GROUND_PAINT.trail`.
+
+- **P20** — Understorey. `fern`, `undergrowth` and `litter` prop factories,
+  scattered through the existing `Scatter` but gated by `World#_treeProximity`
+  so they only grow within `OPEN_WORLD.understoreyRadius` of a trunk that is
+  already standing. No colliders. +45k triangles, build 246ms → 275ms.
+
+- **P21** — Trees, a nudge. Trunk taper, three root buttresses on every trunk
+  (one triangle each, visible because trees are double-sided), a fifth pine
+  tier plus a spire, tiers graded from shaded skirt to lit top, a second green
+  and a capless cone crown on the broadleaf. Paid for with
+  `GeomBuilder.addCone(..., capBottom)` — every stacked tier but the lowest has
+  its base fan buried in the tier below. Pine 50→57 tris, broadleaf 40→48,
+  dead 64→67. World 514k→534k, build 275ms→295ms.
+
 ## Bugs found so far (do not reintroduce)
 
 1. **Stability assist bypassed the grip ceiling.** It was applied after the yaw
@@ -149,6 +181,37 @@ how to tune it and where to build the next act.
     a setting that *looks* applied is worse than one that visibly failed.
     Master and mute hid it by working, because `_applyMasterGain()` does not
     gate on `_live`. Anything deferred past unlock has to be replayed there.
+17. **`Matrix4#decompose` lies about a zero matrix.** three returns scale
+    `(1,1,1)` and an identity rotation for anything whose determinant is zero,
+    which is exactly what a hidden InstancedMesh slot is. A test that finds the
+    live instances by decomposing therefore sees every *hidden* one as full
+    size at the origin — and passes, while asserting nothing. Measure the basis
+    column instead: `Math.hypot(e[0], e[1], e[2])`.
+18. **A pooled instance that stops moving keeps its last matrix.** Ground cover
+    only rewrites an instance when its fade changes by more than an epsilon, so
+    a tuft that left its band while still an epsilon tall never got the final
+    write and stayed drawn, sub-pixel, at a position hundreds of metres behind
+    the player. Invisible, and still wrong. Snap the fade's two plateaus to
+    exactly 0 and 1 so "hidden" is a state you can compare against.
+19. **`TERRAIN_SHAPE.cliffSlope` never fires.** The generated valley is far
+    gentler than it assumes: median slope 0.004, 90th percentile 0.056,
+    steepest vertex in the whole world 0.43, against a threshold of 0.55. Zero
+    vertices classify as `CLIFF` and 78 out of 48,841 as `DIRT`. Anything
+    expressed as a fraction of it — which is the natural thing to write — is
+    dead code that looks alive, and it is why the ground read as tinted noise
+    for so long. Measure the distribution before picking a slope threshold.
+20. **A felled dead tree cannot be worn. STILL OPEN.** `TREES.fellable`
+    includes `dead`, but `Trees#_canopyGeometry` returns null for every dead
+    variant, so the trunk comes down and nothing goes on the car — no error,
+    no log. The cause is an interaction, not a typo: a dead tree's trunk is one
+    cylinder spanning the whole height, so a triangle whose *centroid* is above
+    `canopyY` still has *vertices* on the ground. Pass 1 therefore takes
+    `base = 0`, the `wornCanopy` ceiling comes out at `0.3 × height` — below
+    the `0.45 × height` cut — and pass 2 keeps an empty band.
+    Found while adding roots in P21 and confirmed present beforehand; the fix
+    belongs in `trees.js` (take `base` from the cut, not from the geometry) or
+    in `TREES.wornCanopy`, and was left alone because neither is a look change.
+    Pine and broadleaf are unaffected and asserted.
 
 ## Tooling note
 

@@ -23,12 +23,32 @@ import { CollisionGrid } from './collision.js';
 import { TrackLighting } from './lighting.js';
 import { Trees } from './trees.js';
 import { Wildlife } from './wildlife.js';
+import { GroundCover } from './groundCover.js';
+import { Trails } from './trails.js';
 import { OPEN_WORLD } from '../config/gameplay.js';
 import { surfaceById } from '../config/tuning.js';
 import { clamp01, lerp, smoothstep } from '../core/mathx.js';
 import { events } from '../core/events.js';
 
 const _normal = new THREE.Vector3();
+
+/**
+ * Points of interest, as data.
+ *
+ * Polar rather than cartesian so they survive a change of world radius, and
+ * module-scope rather than inline because the trail network needs to know
+ * where they are *before* the terrain mesh is built — a path that leads
+ * somewhere has to be painted into the ground at the same moment the ground is
+ * (`world/trails.js`). `OPEN_WORLD.trails.links` indexes into this array.
+ */
+export const LANDMARK_DEFS = [
+  { name: 'Vadi', label: 'the valley floor', angle: 0.4, dist: 0.34, radius: 90 },
+  { name: 'Kule', label: 'a radio mast, unlit', angle: 2.1, dist: 0.62, radius: 70 },
+  { name: 'Göl', label: 'still water', angle: 3.4, dist: 0.48, radius: 110 },
+  { name: 'Taşlar', label: 'stones in a ring', angle: 4.6, dist: 0.55, radius: 60 },
+  { name: 'Sırt', label: 'the ridge', angle: 5.5, dist: 0.72, radius: 100 },
+  { name: 'Kenar', label: 'where the fog does not lift', angle: 1.2, dist: 0.93, radius: 140 },
+];
 
 export class World {
   /**
@@ -55,6 +75,10 @@ export class World {
     this.scatter = null;
     /** Animals, pooled around the camera. See wildlife.js. */
     this.wildlife = null;
+    /** Grass, pooled around the camera the same way. See groundCover.js. */
+    this.groundCover = null;
+    /** Worn routes, painted into the terrain's vertex colours. See trails.js. */
+    this.trails = null;
     /** Trunk damage and the disguise. See trees.js. */
     this.trees = new Trees();
     /** @type {{name:string,position:THREE.Vector3,radius:number,discovered:boolean}[]} */
@@ -112,6 +136,24 @@ export class World {
 
     await step('heightfield', 0.3, () => this.terrain.generate());
 
+    // Worn routes have to exist BEFORE the ground is coloured, because they
+    // are drawn into the ground's own vertex colours rather than on top of it.
+    // Only positions are needed here, which is why `LANDMARK_DEFS` is data at
+    // module scope and `_placeLandmarks` (which wants heights) can stay late.
+    await step('trails', 0.42, () => {
+      const span = this.terrain.halfSpan;
+      this.trails = new Trails({
+        halfSpan: span,
+        landmarks: LANDMARK_DEFS.map((d) => ({
+          x: Math.cos(d.angle) * span * d.dist,
+          z: Math.sin(d.angle) * span * d.dist,
+        })),
+        tracks: this._trackList,
+        seed: this.seed,
+      });
+      this.terrain.painter = this.trails.painter(this.theme);
+    });
+
     await step('terrain-mesh', 0.5, () => {
       this.root.add(this.terrain.buildMesh(this.materials, this.theme));
     });
@@ -132,6 +174,23 @@ export class World {
 
     if (scatter) {
       await step('forest', 0.72, () => this._scatterForest());
+      await step('ground-cover', 0.86, () => {
+        // Grass stops at the verge for the same reason the trees do, and by the
+        // same rule — but tighter, because a track with a bare metre of dirt
+        // either side of it reads as maintained, which this one is not. It also
+        // stops on the worn routes: a path with grass growing down the middle
+        // of it is a lawn, and the ground under it is already painted as bare.
+        const offRoad = this._trackAvoidance(OPEN_WORLD.groundCover.trackClearance);
+        const worn = OPEN_WORLD.trails.grassFreeAbove;
+        this.groundCover = new GroundCover({
+          terrain: this.terrain,
+          materials: this.materials,
+          theme: this.theme,
+          seed: this.seed ^ 0x6c0f,
+          avoid: (x, z) => offRoad(x, z) || this.trails.strengthAt(x, z) > worn,
+        }).build();
+        this.root.add(this.groundCover.root);
+      });
       await step('wildlife', 0.9, () => {
         this.wildlife = new Wildlife({
           terrain: this.terrain,
@@ -151,6 +210,72 @@ export class World {
     return this;
   }
 
+  /**
+   * A predicate that rejects anything too close to a racing surface.
+   *
+   * Shared by the forest and the ground cover so there is exactly one answer to
+   * "is this the road?" — if they used different rules you would get grass
+   * growing where trees are forbidden, which reads as a mown verge.
+   *
+   * @param {number} margin metres of clearance beyond the shoulder
+   * @returns {(x:number, z:number)=>boolean} true = do not place here
+   */
+  _trackAvoidance(margin) {
+    const clearance = ROAD.shoulderWidth + margin;
+    return (x, z) => {
+      for (const t of this._trackList) {
+        const q = t.query(x, z, this._query);
+        if (q && q.dist < q.halfWidth + clearance) return true;
+      }
+      return false;
+    };
+  }
+
+  /**
+   * A predicate that rejects anywhere NOT within `radius` of a tree that has
+   * already been planted.
+   *
+   * The understorey has to come after the canopy, in both senses: it is placed
+   * after the trees, and it is placed *because of* them. Handing this to
+   * `Scatter#place` as its `avoid` is what turns a second even scattering of
+   * ferns into a forest floor.
+   *
+   * Buckets the trunks into a grid at exactly the query radius, so a lookup
+   * touches four cells and nothing else. With 4200 trees a linear scan per
+   * attempt would be sixty million distance tests over the three placements.
+   *
+   * @param {object[]} colliders `Scatter#colliders`, filtered by `kind`
+   * @param {number} radius metres
+   * @returns {(x:number, z:number)=>boolean} true = do not place here
+   */
+  _treeProximity(colliders, radius) {
+    const cell = radius;
+    const grid = new Map();
+    for (const c of colliders) {
+      const key = Math.floor(c.x / cell) + ',' + Math.floor(c.z / cell);
+      let list = grid.get(key);
+      if (!list) grid.set(key, (list = []));
+      list.push(c);
+    }
+    const r2 = radius * radius;
+    return (x, z) => {
+      const gi = Math.floor(x / cell);
+      const gj = Math.floor(z / cell);
+      for (let j = gj - 1; j <= gj + 1; j++) {
+        for (let i = gi - 1; i <= gi + 1; i++) {
+          const list = grid.get(i + ',' + j);
+          if (!list) continue;
+          for (let k = 0; k < list.length; k++) {
+            const dx = list[k].x - x;
+            const dz = list[k].z - z;
+            if (dx * dx + dz * dz <= r2) return false;
+          }
+        }
+      }
+      return true;
+    };
+  }
+
   _scatterForest() {
     const s = new Scatter({
       terrain: this.terrain,
@@ -162,14 +287,7 @@ export class World {
 
     // Keep props off the racing surface and its run-off, but let them creep
     // right up to the edge — the forest should feel like it is pressing in.
-    const clearance = ROAD.shoulderWidth + 3.5;
-    const avoidTracks = (x, z) => {
-      for (const t of this._trackList) {
-        const q = t.query(x, z, this._query);
-        if (q && q.dist < q.halfWidth + clearance) return true;
-      }
-      return false;
-    };
+    const avoidTracks = this._trackAvoidance(3.5);
 
     const D = OPEN_WORLD.scatterDensity;
     const span = this.terrain.halfSpan;
@@ -178,7 +296,20 @@ export class World {
     s.place({ kind: 'dead', count: Math.round(D.trees * 0.1), region: { inner: span * 0.3, radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'rock', count: D.rocks, region: { radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'bush', count: D.bushes, region: { radius: span * 0.95 }, avoid: avoidTracks });
-    s.place({ kind: 'grass', count: D.grass, region: { radius: span * 0.9 }, avoid: avoidTracks });
+    // THE UNDERSTOREY, placed after the canopy it belongs under and *because*
+    // of it: `_treeProximity` rejects anywhere that is not within reach of a
+    // trunk that has already gone in. Everything from here down is scenery you
+    // drive straight through, so none of it produces a collider.
+    const nearTrees = this._treeProximity(
+      s.colliders.filter((c) => c.kind === 'pine' || c.kind === 'broadleaf'),
+      OPEN_WORLD.understoreyRadius
+    );
+    const underCanopy = (x, z) => avoidTracks(x, z) || nearTrees(x, z);
+    s.place({ kind: 'fern', count: D.ferns, region: { radius: span * 0.95 }, avoid: underCanopy });
+    s.place({ kind: 'undergrowth', count: D.undergrowth, region: { radius: span * 0.95 }, avoid: underCanopy });
+    s.place({ kind: 'litter', count: D.litter, region: { radius: span * 0.95 }, avoid: underCanopy });
+    // Grass is NOT scattered. It is a pool that follows the camera — see
+    // `groundCover.js` and `OPEN_WORLD.groundCover`.
     s.place({ kind: 'log', count: Math.round(D.rocks * 0.35), region: { radius: span * 0.9 }, avoid: avoidTracks });
     // Blank signs only exist away from the tracks. Nobody was meant to read them.
     s.place({ kind: 'sign', count: 90, region: { inner: span * 0.25, radius: span * 0.9 }, avoid: avoidTracks });
@@ -198,15 +329,7 @@ export class World {
    */
   _placeLandmarks() {
     const span = this.terrain.halfSpan;
-    const defs = [
-      { name: 'Vadi', label: 'the valley floor', angle: 0.4, dist: 0.34, radius: 90 },
-      { name: 'Kule', label: 'a radio mast, unlit', angle: 2.1, dist: 0.62, radius: 70 },
-      { name: 'Göl', label: 'still water', angle: 3.4, dist: 0.48, radius: 110 },
-      { name: 'Taşlar', label: 'stones in a ring', angle: 4.6, dist: 0.55, radius: 60 },
-      { name: 'Sırt', label: 'the ridge', angle: 5.5, dist: 0.72, radius: 100 },
-      { name: 'Kenar', label: 'where the fog does not lift', angle: 1.2, dist: 0.93, radius: 140 },
-    ];
-    for (const d of defs) {
+    for (const d of LANDMARK_DEFS) {
       const x = Math.cos(d.angle) * span * d.dist;
       const z = Math.sin(d.angle) * span * d.dist;
       this.landmarks.push({
@@ -396,6 +519,8 @@ export class World {
 
   update(dt, time, cameraPosition = null) {
     this.wildlife?.update(dt, cameraPosition);
+    // Grass follows the camera and blows in the wind. Both live in here.
+    this.groundCover?.update(dt, cameraPosition);
     // Watches for the player shrugging off a worn tree. Costs nothing while
     // nobody is wearing one, which is almost always.
     this.trees.update(dt);
@@ -416,6 +541,7 @@ export class World {
     this.lighting.clear();
     this.terrain?.dispose();
     this.wildlife?.dispose();
+    this.groundCover?.dispose();
     this.trees.dispose();
     this.scatter?.dispose();
     this.collision.clear();

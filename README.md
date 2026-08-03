@@ -161,8 +161,9 @@ with a car, a steering input and an assertion about which way it ended up.
 src/
   config/     tuning · camera · style · gameplay · settings   ← the knobs
   core/       loop · events · input · modes · rng · mathx
-  render/     renderer · postfx · psx · materials · cameraRig · geometry · lightPool
+  render/     renderer · postfx · psx · wind · materials · cameraRig · geometry · lightPool
   world/      terrain · track · scatter · props · collision · lighting · world
+              trails · groundCover · wildlife · trees
     tracks/   track1 · track2 · track3                ← parkours as data
   vehicle/    vehicle · chassis · ai · contacts
   audio/      procedural WebAudio — no asset files
@@ -252,6 +253,140 @@ the question the sirens ask.
 
 `CHASE.mercyAfter` guarantees you win eventually. It is a scene, not a skill check.
 
+### Dirt, and why the slope thresholds are absolute
+
+`buildPalette` in `src/world/terrain.js` bakes four layers into the terrain's
+vertex colours — turf mottling, **wear** to bare earth as the land tips over,
+**damp** darkening down toward `TERRAIN_SHAPE.waterLevel`, and **grit**. The
+colours are per-theme (`ground.dirt` / `ground.mud` / `ground.grit`); the rules
+are one block, `GROUND_PAINT` in `style.js`. It is all free: the mesh already
+carries a colour attribute.
+
+The obvious way to write the wear thresholds is as fractions of
+`TERRAIN_SHAPE.cliffSlope`, so that retuning what counts as a cliff drags the
+bare earth with it. Do not. **This valley has no cliffs.** Measured over the
+built world the median slope is 0.004, the 90th percentile 0.056, and the
+steepest vertex anywhere is 0.43 — against a `cliffSlope` of 0.55. Not one
+vertex in 48,841 classifies as `CLIFF` and only 78 as `DIRT`. Hang anything off
+that number and it never fires, which is exactly why the ground used to read as
+tinted noise. The thresholds in `GROUND_PAINT` are absolute, and the measured
+percentiles are written down next to them.
+
+### A nudge to the trees, and the thing that nearly broke
+
+`createPine` went from 50 to 57 triangles, `createBroadleaf` from 40 to 48, the
+dead tree from 64 to 67. Trunks taper properly, pines get a fifth tier and a
+four-triangle spire, canopy tiers grade from shaded at the skirt to lit at the
+top, broadleaves carry two greens instead of one, and everything with a trunk
+gets three **root buttresses** — one triangle each, visible because trees use
+the double-sided `foliage` material. Roots are what stop a cylinder meeting
+flat ground at a clean circle and reading as a post pushed into the soil.
+
+Two things paid for it. `GeomBuilder.addCone` now takes `capBottom`, and every
+stacked canopy tier but the lowest passes false: a cone's base fan is four
+triangles buried inside the tier below it, times four thousand trees. And the
+broadleaf's third canopy mass is a capless five-sided cone rather than a
+twelfth frustum box.
+
+> **⚠ Tree geometry is gameplay.** `collider.canopyY` is where `Trees` cuts a
+> felled tree into the thing the player wears, and the collider *is* the
+> identity of a fellable trunk. Two invariants hold it together, both now
+> asserted: every variant must have triangles on both sides of `canopyY`, and
+> nothing drawn near the ground may reach outside `collider.radius` — a root
+> you can drive through is worse than no root. Foliage above that is *supposed*
+> to overhang; you drive under branches.
+
+**A pre-existing bug found while checking this, and left alone:** a felled dead
+tree has never produced a wearable cover. Its trunk is a single cylinder
+spanning the whole height, so `Trees#_canopyGeometry`'s first pass takes `base`
+from the ground, and the `TREES.wornCanopy` ceiling then lands *below*
+`canopyY`, leaving an empty band and returning null. The tree comes down and
+nothing goes on the car. Verified present before these changes; the fix belongs
+in `trees.js` or in `wornCanopy`, neither of which is a rendering concern.
+
+### The understorey is placed by the canopy
+
+Ferns, low broad-leaved undergrowth and leaf litter (`createFern`,
+`createUndergrowth`, `createLitter`) go through the same `Scatter` as
+everything else, but they are placed **after** the trees and **because** of
+them: `World#_treeProximity` buckets every trunk that has already gone in and
+rejects any spot further than `OPEN_WORLD.understoreyRadius` from one. That is
+the difference between a forest floor and a second even scattering of ferns —
+median distance from a fern to a pine is 11.5 m, against 24 m for open ground.
+
+The tempting alternative is to give the understorey the pine's own
+`clumpScale`, on the theory that two kinds sampling the same noise field at the
+same frequency clump in the same places. They do — but that field's features
+are 450 m across, so it correlates them with the broad regions the forest is
+dense in and not with any actual tree. It buys about a 20% improvement and
+looks like nothing.
+
+None of it has a collider; you plough straight through all of it. Leaf litter
+is the one prop with a vertical constraint: `Scatter` sinks every prop 8 cm and
+never tilts anything to the ground, so the litter geometry has to start above
+that by itself, and `npm test` asserts the lowest piece still clears the sink at
+minimum scale.
+
+### Somebody was here first
+
+`src/world/trails.js` wears routes into the world: one from each landmark down
+to the nearest parkour, a few between adjacent landmarks, and eleven **spurs** —
+short ruts that leave a parkour, go into the trees, and stop. The spurs do most
+of the storytelling, because they are the only ones the player is likely to
+meet, and a rut that ends in nothing says somebody pulled over here far better
+than a path between two landmarks does.
+
+None of it is geometry. A trail is a rule that darkens the terrain's own vertex
+colours while they are being baked, through **`Terrain#painter`** — the
+colour-space sibling of `Terrain#shaper`. `shaper` lets something that is not
+terrain change the shape of the ground without the terrain knowing what a track
+is; `painter` does the same for its colour. So the whole network costs one
+distance query per terrain vertex at build time and nothing at all afterwards:
+no draw call, no overdraw, no z-fighting with the ground it is drawn on, and it
+cross-fades with the theme like every other vertex colour in the world.
+
+Two things keep it from reading as painted stripes: routes wander (a seeded
+perpendicular offset, pinned at both ends) and they fade in and out along their
+length against a noise field, so most of any given path has grown back over.
+The ground cover shares the same field — grass does not grow on a path.
+
+**The resolution ceiling, stated plainly.** The heightfield has a vertex every
+13 m, so a two-metre tyre rut cannot be drawn here: it would fall between
+vertices and alias into nothing. What is drawn is a worn band a couple of
+vertices across. Ruts at their real width would need a second mesh, which is
+the thing this file exists to avoid.
+
+### The grass is a pool, not scenery
+
+Ground cover used to be scattered like everything else: 5200 tufts over a
+2860 m span, which is one tuft per 1500 m² and therefore no grass at all.
+Ten times as many would have cost ten times the memory to fill a world you can
+never see one percent of at once.
+
+So `src/world/groundCover.js` borrows the trick from `wildlife.js`. A fixed
+population lives in two **bands that follow the camera** — a thick one 25 m
+across your feet and a coarse one out to 78 m — and a tuft that falls out of its
+band is reflected through the camera to the far edge of the same band, where it
+grows in out of the fog. 2800 tufts make the whole world look grassy, nothing is
+allocated after `build()`, and the numbers in `OPEN_WORLD.groundCover` are how
+much grass is *around you* rather than how much exists.
+
+Two details do most of the work:
+
+- **A recycled tuft always arrives at zero size** and scales in over the outer
+  `fadeBand` of its radius. That is the entire anti-pop-in mechanism; there is
+  no distance check anywhere else.
+- **The blades bend in the shader**, not on the CPU (`src/render/wind.js`,
+  injected at `#include <begin_vertex>` the way `psx.js` injects at
+  `#include <fog_vertex>`). Displacement scales with the square of the height
+  above the tuft's own origin, so the roots stay welded to the terrain. An
+  instance matrix is only ever rewritten when the tuft is recycled or when its
+  fade moves — the grass waves without anything touching it.
+
+A camera that *teleports* (a respawn, a mode change) breaks the reflection
+assumption completely, so a jump wider than the widest band re-lays the whole
+population instead. Without that you stand in a perfectly circular bald patch.
+
 ### The forest is scenery until you have earned it
 
 Hit a tree hard enough and it comes down on the car and stays there: a car wearing
@@ -292,11 +427,14 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 167 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 263 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
-collision, the settings round trip, and the physics: 0–100, top speed, braking,
-understeer on ice, and a simulated human driving the third parkour's corner and
-coming off it.
+collision, ground-cover placement, the vertex-wind injection, the terrain's own
+vertex colours, the worn trails, the understorey, tree-collider integrity, the
+settings round trip, and
+the physics:
+0–100, top speed, braking, understeer on ice, and a simulated human driving the
+third parkour's corner and coming off it.
 
 ### Bugs it caught, and one it could not
 

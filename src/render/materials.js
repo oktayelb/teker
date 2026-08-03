@@ -12,12 +12,14 @@
 
 import * as THREE from 'three';
 import { applyPsx, setPsxSnap } from './psx.js';
+import { applyVertexWind } from './wind.js';
 
 /** Roles that exist in every theme, and where their representative colour lives. */
 const ROLE_TINT_SOURCE = {
   terrain: ['ground', 'base'],
   road: ['road', 'surface'],
   foliage: ['foliage', 'canopyA'],
+  grass: ['foliage', 'grassBlade'],
   trunk: ['foliage', 'trunk'],
   prop: ['props', 'rock'],
   barrier: ['props', 'barrier'],
@@ -59,6 +61,18 @@ export class MaterialLibrary {
     this._psx = [];
     /** @type {Map<number, THREE.Material>} car body materials by colour */
     this._carCache = new Map();
+    /**
+     * Shared wind uniforms. One set for the whole library, so animating every
+     * blade of grass in the world is a single float write per frame.
+     * `uWindTime` is an accumulated PHASE, not elapsed seconds — the caller
+     * integrates `dt * speed` so retuning the speed never jumps the animation.
+     */
+    this._wind = {
+      uWindTime: { value: 0 },
+      uWindStrength: { value: 0 },
+      uWindScale: { value: 0.05 },
+      uWindDir: { value: new THREE.Vector2(1, 0) },
+    };
   }
 
   /** Base constructor for lit surfaces — swappable if you want PBR later. */
@@ -101,6 +115,11 @@ export class MaterialLibrary {
 
       case 'foliage':
         return this._lit({ side: THREE.DoubleSide });
+
+      case 'grass':
+        // Foliage that bends. Double-sided because a blade is one triangle
+        // strip and you are as likely to be looking at its back as its front.
+        return applyVertexWind(this._lit({ side: THREE.DoubleSide }), this._wind);
 
       case 'trunk':
       case 'prop':
@@ -247,6 +266,31 @@ export class MaterialLibrary {
         mat.needsUpdate = true;
       }
     }
+  }
+
+  // -- wind -----------------------------------------------------------------
+
+  /**
+   * Set the wind's shape. Called once, by whoever owns the config for it —
+   * this file deliberately does not read `gameplay.js`.
+   * @param {{strength:number, scale:number, direction:{x:number,z:number}}} cfg
+   */
+  configureWind(cfg) {
+    if (!cfg) return;
+    this._wind.uWindStrength.value = cfg.strength ?? 0;
+    this._wind.uWindScale.value = cfg.scale ?? 0.05;
+    const d = cfg.direction ?? { x: 1, z: 0 };
+    this._wind.uWindDir.value.set(d.x, d.z).normalize();
+  }
+
+  /**
+   * Advance the wind. `phase` is in radians and only ever increases; the caller
+   * integrates it so that changing the speed does not discontinuously jump
+   * every blade in the world.
+   * @param {number} phase radians
+   */
+  setWindTime(phase) {
+    this._wind.uWindTime.value = phase;
   }
 
   setSunDirection(vec3) {

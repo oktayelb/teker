@@ -18,6 +18,40 @@ import { Rng } from '../core/rng.js';
 
 const V0 = { x: 0, y: 0, z: 0 };
 
+/**
+ * Root buttresses: single triangles standing on edge around the base of a trunk.
+ *
+ * One triangle each, and they work because everything with a trunk is drawn
+ * with the double-sided `foliage` material, so a fin is visible from both
+ * sides. What they buy is the join: a cylinder that meets flat ground at a
+ * clean circle reads as a post somebody pushed into the soil, and three
+ * triangles are the difference between that and something that grew there.
+ *
+ * They stay INSIDE the trunk collider's radius on purpose — the roots are then
+ * a visual explanation of why the car stops where it stops.
+ *
+ * @param {GeomBuilder} b
+ * @param {number} trunkR trunk radius at the ground
+ * @param {number} reach how far out the roots spread, as a multiple of trunkR
+ * @param {number} rise how far up the trunk they climb, as a multiple of trunkR
+ */
+function addRoots(b, rng, trunkR, colour, count, reach = 3, rise = 2.2) {
+  const spin = rng.range(0, Math.PI * 2);
+  for (let i = 0; i < count; i++) {
+    const a = spin + (i / count) * Math.PI * 2 + rng.range(-0.4, 0.4);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const out = trunkR * reach * rng.range(0.7, 1);
+    const up = trunkR * rise * rng.range(0.75, 1);
+    b.addTriangle(
+      new THREE.Vector3(cos * trunkR * 0.8, 0, sin * trunkR * 0.8),
+      new THREE.Vector3(cos * out, 0, sin * out),
+      new THREE.Vector3(cos * trunkR * 0.8, up, sin * trunkR * 0.8),
+      shade(colour, rng.range(-0.05, 0.01))
+    );
+  }
+}
+
 /** Conifer: the backbone of the forest. */
 export function createPine(theme, rng, scaleHint = 1) {
   const b = new GeomBuilder();
@@ -26,12 +60,15 @@ export function createPine(theme, rng, scaleHint = 1) {
   const trunkH = height * rng.range(0.2, 0.3);
   const trunkR = height * 0.035;
 
-  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.25, trunkR, trunkH, 5, {
+  // A real trunk is nearly twice as wide at the soil as it is at the first
+  // branch. The taper costs nothing — the cylinder was always there.
+  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.7, trunkR * 0.85, trunkH, 5, {
     side: F.trunk,
     top: shade(F.trunk, 0.08),
   });
+  addRoots(b, rng, trunkR, shade(F.trunk, -0.07), 3, 3, 2.4);
 
-  const tiers = rng.int(3, 4);
+  const tiers = rng.int(4, 5);
   const canopyH = height - trunkH;
   const shades = [F.canopyA, F.canopyB, F.canopyC];
   for (let i = 0; i < tiers; i++) {
@@ -39,11 +76,26 @@ export function createPine(theme, rng, scaleHint = 1) {
     const y = trunkH + canopyH * t * 0.72;
     const r = height * 0.26 * (1 - t * 0.62);
     const h = canopyH * (0.46 - t * 0.06);
+    // Light arrives from above, so the skirt sits in the tree's own shadow and
+    // the tiers lighten as they climb. Cycling three flat shades gives variety;
+    // grading them gives depth, and it is the same number of triangles.
+    const tone = shade(shades[i % shades.length], -0.07 + t * 0.17);
     b.addCone({ x: 0, y, z: 0 }, r, h, 6, {
-      side: shades[i % shades.length],
-      bottom: shade(shades[i % shades.length], -0.06),
-    }, rng.range(0, 1));
+      side: tone,
+      bottom: shade(tone, -0.08),
+    }, rng.range(0, 1), i === 0);
+    // Only the lowest tier's underside is ever visible — the rest are buried in
+    // the tier below. See `GeomBuilder#addCone`.
   }
+
+  // The spire. A pine's silhouette is a point, and a stack of cones alone ends
+  // in a blunt one; four triangles sharpen the whole tree from any distance.
+  const tLast = (tiers - 1) / tiers;
+  const topY = trunkH + canopyH * tLast * 0.72;
+  const topH = canopyH * (0.46 - tLast * 0.06);
+  b.addCone({ x: 0, y: topY + topH * 0.45, z: 0 }, height * 0.05, topH * 0.85, 4, {
+    all: shade(shades[tiers % shades.length], 0.11),
+  }, rng.range(0, 1), false);
 
   return {
     geometry: b.build(),
@@ -64,15 +116,20 @@ export function createBroadleaf(theme, rng, scaleHint = 1) {
   const trunkH = height * rng.range(0.34, 0.44);
   const trunkR = height * 0.045;
 
-  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.3, trunkR * 0.85, trunkH, 5, {
+  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.55, trunkR * 0.8, trunkH, 5, {
     side: F.trunk,
     top: shade(F.trunk, 0.06),
   });
+  addRoots(b, rng, trunkR, shade(F.trunk, -0.06), 3, 2.6, 2);
 
   // Canopy: two overlapping squashed cones, offset — asymmetry reads as organic.
   const canopyR = height * 0.3;
   const canopyY = trunkH * 0.92;
   const shadesA = rng.pick([F.canopyA, F.canopyB]);
+  // The second mass takes its colour from a DIFFERENT entry rather than a
+  // shade of the first, so a broadleaf has two greens in it the way a real one
+  // does. Shading alone only ever produces a lighter version of one leaf.
+  const shadesB = shadesA === F.canopyA ? F.canopyB : F.canopyC;
   b.addFrustumBox(
     { x: 0, y: canopyY + canopyR * 0.55, z: 0 },
     { x: canopyR * 2, y: canopyR * 1.4, z: canopyR * 2 },
@@ -84,8 +141,24 @@ export function createBroadleaf(theme, rng, scaleHint = 1) {
     { x: canopyR * rng.range(-0.3, 0.3), y: canopyY + canopyR * 1.25, z: canopyR * rng.range(-0.3, 0.3) },
     { x: canopyR * 1.3, y: canopyR * 0.9, z: canopyR * 1.3 },
     { x: 0.4, z: 0.4 },
-    { all: shade(shadesA, 0.05), top: shade(shadesA, 0.12) },
+    { all: shadesB, top: shade(shadesB, 0.1) },
     rng.range(0, Math.PI)
+  );
+  // A third, smaller mass pushed out to one side. Five triangles as a capless
+  // cone rather than twelve as another box: it is a crown, and nobody sees the
+  // underside of a crown that is sitting on the canopy below it.
+  b.addCone(
+    {
+      x: canopyR * rng.range(-0.55, 0.55),
+      y: canopyY + canopyR * rng.range(1.1, 1.5),
+      z: canopyR * rng.range(-0.55, 0.55),
+    },
+    canopyR * rng.range(0.55, 0.8),
+    canopyR * rng.range(0.8, 1.25),
+    5,
+    { all: shade(shadesB, 0.06) },
+    rng.range(0, Math.PI),
+    false
   );
 
   return {
@@ -104,7 +177,16 @@ export function createDeadTree(theme, rng, scaleHint = 1) {
   const height = rng.range(5, 9) * scaleHint;
   const trunkR = height * 0.04;
   const col = shade(F.trunk, -0.05);
-  b.addCylinder({ x: 0, y: height / 2, z: 0 }, trunkR * 1.5, trunkR * 0.5, height, 5, { all: col });
+  // Bare wood is paler where it has weathered and dark down at the soil line.
+  b.addCylinder({ x: 0, y: height / 2, z: 0 }, trunkR * 1.9, trunkR * 0.45, height, 5, {
+    side: col,
+    top: shade(col, 0.14),
+    bottom: shade(col, -0.1),
+  });
+  // A dead tree has lost its bark and its roots are the most visible part of
+  // it. `reach` stays inside this variant's collider radius (`trunkR * 3`) —
+  // visible geometry outside the hitbox is a root you drive through.
+  addRoots(b, rng, trunkR, shade(col, -0.08), 3, 2.8, 2.6);
 
   const branches = rng.int(2, 4);
   for (let i = 0; i < branches; i++) {
@@ -178,25 +260,219 @@ export function createBush(theme, rng, scaleHint = 1) {
   return { geometry: b.build(), collider: null, tag: 'bush', height: size };
 }
 
-/** Grass tuft: two crossed blades. Cheap ground texture at low draw cost. */
-export function createGrassTuft(theme, rng, scaleHint = 1) {
+/**
+ * Grass tuft: a rosette of tapered, arching blades.
+ *
+ * This used to be two crossed quads standing straight up, which from a chase
+ * camera is a green X on the floor — a decal, not a plant. What sells grass at
+ * this poly count is the SILHOUETTE: several blades leaving one point at
+ * different angles, each narrowing and bending over. Three triangles buys all
+ * of that per blade (a quad for the stem, one triangle for the tip), and the
+ * two pieces take different shades so the tuft has a dark root and a lit tip
+ * without a single extra vertex.
+ *
+ * Everything starts at y = 0 because the wind shader bends by y² — see
+ * `render/wind.js`. A blade whose base is above the origin would visibly slide.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.blades] blades in the rosette; 3 is the far-band LOD
+ */
+export function createGrassTuft(theme, rng, scaleHint = 1, opts = null) {
   const b = new GeomBuilder();
   const c = theme.foliage.grassBlade;
-  const h = rng.range(0.4, 0.9) * scaleHint;
-  const w = h * 0.55;
-  for (let i = 0; i < 2; i++) {
-    const a = i * Math.PI * 0.5 + rng.range(0, 0.6);
-    const dx = Math.cos(a) * w;
-    const dz = Math.sin(a) * w;
+  const blades = Math.max(1, Math.round(opts?.blades ?? 4));
+  const h = rng.range(0.42, 0.85) * scaleHint;
+  // Blades share the rosette evenly, then jitter — evenly spaced alone reads as
+  // a fan, purely random leaves gaps you see as a bald patch.
+  const step = (Math.PI * 2) / blades;
+  const spin = rng.range(0, Math.PI * 2);
+  let tallest = 0;
+
+  for (let i = 0; i < blades; i++) {
+    const a = spin + i * step + rng.range(-0.35, 0.35);
+    const len = h * rng.range(0.7, 1.25);
+    tallest = Math.max(tallest, len);
+    const halfW = len * rng.range(0.045, 0.075);
+    // Which way this blade arches, and how far it has fallen from vertical.
+    const bend = len * rng.range(0.18, 0.5);
+    const bx = Math.cos(a) * bend;
+    const bz = Math.sin(a) * bend;
+    // The blade's own plane, so the strip is not edge-on to its own arc.
+    const px = -Math.sin(a) * halfW;
+    const pz = Math.cos(a) * halfW;
+
+    const midY = len * 0.55;
+    const tone = rng.range(-0.06, 0.06);
+    const root = shade(c, tone - 0.07);
+    const tip = shade(c, tone + 0.09);
+
+    // Stem: full width at the ground, three-fifths of it at mid height, already
+    // leaning a third of the way into the arch.
+    const mx = bx * 0.3;
+    const mz = bz * 0.3;
     b.addQuad(
-      new THREE.Vector3(-dx, 0, -dz),
-      new THREE.Vector3(dx, 0, dz),
-      new THREE.Vector3(dx, h, dz),
-      new THREE.Vector3(-dx, h, -dz),
-      shade(c, rng.range(-0.05, 0.08))
+      new THREE.Vector3(-px, 0, -pz),
+      new THREE.Vector3(px, 0, pz),
+      new THREE.Vector3(mx + px * 0.6, midY, mz + pz * 0.6),
+      new THREE.Vector3(mx - px * 0.6, midY, mz - pz * 0.6),
+      root
+    );
+    // Tip: from mid width to a point, out at the end of the arch.
+    b.addTriangle(
+      new THREE.Vector3(mx - px * 0.6, midY, mz - pz * 0.6),
+      new THREE.Vector3(mx + px * 0.6, midY, mz + pz * 0.6),
+      new THREE.Vector3(bx, len, bz),
+      tip
     );
   }
-  return { geometry: b.build(), collider: null, tag: 'grass', height: h };
+
+  return { geometry: b.build(), collider: null, tag: 'grass', height: tallest };
+}
+
+/**
+ * Fern: a rosette of arching fronds.
+ *
+ * A frond is TWO triangles, arranged as a lance — pointed where it leaves the
+ * crown, widest in the middle, pointed again at the tip. A rectangle costs the
+ * same two triangles and reads as a strip of tape; the two points are the
+ * entire difference between a fern and a flag. They arch outward and over,
+ * because a frond held straight up is a blade of grass.
+ */
+export function createFern(theme, rng, scaleHint = 1) {
+  const b = new GeomBuilder();
+  const F = theme.foliage;
+  const fronds = rng.int(4, 6);
+  const h = rng.range(0.5, 1.05) * scaleHint;
+  const spin = rng.range(0, Math.PI * 2);
+  const step = (Math.PI * 2) / fronds;
+
+  for (let i = 0; i < fronds; i++) {
+    const a = spin + i * step + rng.range(-0.3, 0.3);
+    const len = h * rng.range(0.8, 1.2);
+    const reach = len * rng.range(0.55, 0.95);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    // Across the frond, so the lance has width to be seen from the side.
+    const halfW = len * rng.range(0.13, 0.2);
+    const px = -sin * halfW;
+    const pz = cos * halfW;
+    // Mid-point is out and up; the tip is further out and has started to fall.
+    const mx = cos * reach * 0.45;
+    const mz = sin * reach * 0.45;
+    const my = len * 0.62;
+    const tx = cos * reach;
+    const tz = sin * reach;
+    const ty = len * rng.range(0.7, 0.95);
+
+    const tone = rng.range(-0.05, 0.05);
+    b.addTriangle(
+      new THREE.Vector3(0, len * 0.1, 0),
+      new THREE.Vector3(mx + px, my, mz + pz),
+      new THREE.Vector3(mx - px, my, mz - pz),
+      shade(F.fern, tone - 0.05)
+    );
+    b.addTriangle(
+      new THREE.Vector3(mx - px, my, mz - pz),
+      new THREE.Vector3(mx + px, my, mz + pz),
+      new THREE.Vector3(tx, ty, tz),
+      shade(F.fern, tone + 0.06)
+    );
+  }
+  return { geometry: b.build(), collider: null, tag: 'fern', height: h };
+}
+
+/**
+ * Undergrowth: the low broad-leaved stuff that fills the gaps between ferns.
+ *
+ * Four flat leaves lying almost horizontally, which is what makes it read as a
+ * different plant to the fern standing next to it rather than a smaller one.
+ * Nothing under a canopy grows tall; it grows sideways, at the light.
+ */
+export function createUndergrowth(theme, rng, scaleHint = 1) {
+  const b = new GeomBuilder();
+  const F = theme.foliage;
+  const leaves = rng.int(3, 5);
+  const size = rng.range(0.35, 0.8) * scaleHint;
+  const spin = rng.range(0, Math.PI * 2);
+  const step = (Math.PI * 2) / leaves;
+  const base = rng.bool(0.35) ? F.bush : F.fern;
+
+  for (let i = 0; i < leaves; i++) {
+    const a = spin + i * step + rng.range(-0.4, 0.4);
+    const len = size * rng.range(0.85, 1.3);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const w = len * rng.range(0.3, 0.45);
+    // Almost flat, tipped just enough to catch a different shade of light.
+    const lift = size * rng.range(0.12, 0.34);
+    const stem = size * 0.14;
+    b.addQuad(
+      new THREE.Vector3(-sin * stem * 0.5, stem, cos * stem * 0.5),
+      new THREE.Vector3(sin * stem * 0.5, stem, -cos * stem * 0.5),
+      new THREE.Vector3(cos * len + sin * w, lift, sin * len - cos * w),
+      new THREE.Vector3(cos * len - sin * w, lift, sin * len + cos * w),
+      shade(base, rng.range(-0.06, 0.08))
+    );
+  }
+  return { geometry: b.build(), collider: null, tag: 'undergrowth', height: size * 0.4 };
+}
+
+/**
+ * Leaf litter and twigs — the forest floor itself.
+ *
+ * A handful of small quads lying nearly flat, plus a couple of sticks. Kept
+ * DELIBERATELY SMALL, under half a metre across, and lifted a little clear of
+ * the origin. `Scatter` sinks every prop 8cm and does not tilt anything to the
+ * ground, so a wide flat patch on a slope has one edge in the air and the other
+ * buried. A small patch sinks a centimetre at worst, and leaves that are half
+ * in the soil are leaves.
+ */
+export function createLitter(theme, rng, scaleHint = 1) {
+  const b = new GeomBuilder();
+  const F = theme.foliage;
+  const spread = rng.range(0.3, 0.45) * scaleHint;
+  const pieces = rng.int(2, 4);
+
+  for (let i = 0; i < pieces; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    const r = spread * rng.range(0.1, 1);
+    const cx = Math.cos(a) * r;
+    const cz = Math.sin(a) * r;
+    const y = 0.13 + rng.range(0, 0.09);
+    const w = spread * rng.range(0.35, 0.65);
+    const l = w * rng.range(1.1, 1.9);
+    const t = rng.range(0, Math.PI);
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    // A leaf: a long quad, tipped a few degrees so a whole patch is not one
+    // perfectly level plane. The tip only ever goes UP — a downward corner puts
+    // that end of the leaf under the ground, which is the whole reason the
+    // lowest point of this geometry has to clear the sink.
+    const tip = rng.range(0, 0.05);
+    b.addQuadFacing(
+      new THREE.Vector3(cx - cos * l - sin * w, y, cz - sin * l + cos * w),
+      new THREE.Vector3(cx + cos * l - sin * w, y + tip, cz + sin * l + cos * w),
+      new THREE.Vector3(cx + cos * l + sin * w, y + tip, cz + sin * l - cos * w),
+      new THREE.Vector3(cx - cos * l + sin * w, y, cz - sin * l - cos * w),
+      shade(F.litter, rng.range(-0.1, 0.1))
+    );
+  }
+  // One twig, always. It is the thing that says "floor" rather than "carpet".
+  {
+    const a = rng.range(0, Math.PI * 2);
+    const len = spread * rng.range(1.4, 2.4);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const w = spread * 0.06;
+    b.addQuadFacing(
+      new THREE.Vector3(-cos * len - sin * w, 0.13, -sin * len + cos * w),
+      new THREE.Vector3(cos * len - sin * w, 0.16, sin * len + cos * w),
+      new THREE.Vector3(cos * len + sin * w, 0.16, sin * len - cos * w),
+      new THREE.Vector3(-cos * len + sin * w, 0.13, -sin * len - cos * w),
+      shade(F.trunk, rng.range(-0.04, 0.06))
+    );
+  }
+  return { geometry: b.build(), collider: null, tag: 'litter', height: 0.2 };
 }
 
 /** A felled log — reads as "someone worked here", which the empty world needs. */
@@ -494,6 +770,9 @@ export const PROP_FACTORIES = {
   dead: createDeadTree,
   rock: createRock,
   bush: createBush,
+  fern: createFern,
+  undergrowth: createUndergrowth,
+  litter: createLitter,
   grass: createGrassTuft,
   log: createLog,
   post: createMarkerPost,
@@ -509,13 +788,15 @@ export const PROP_FACTORIES = {
 /**
  * Pre-build `count` variants of a prop type so instancing has something to
  * choose between.
+ * @param {object} [opts] passed through to the factory — how a caller asks for
+ *   a cheaper or denser build of the same prop without props.js reading config
  * @returns {Prop[]}
  */
-export function buildVariants(kind, theme, seed, count = 4, scaleHint = 1) {
+export function buildVariants(kind, theme, seed, count = 4, scaleHint = 1, opts = null) {
   const factory = PROP_FACTORIES[kind];
   if (!factory) throw new Error(`Unknown prop kind "${kind}"`);
   const rng = new Rng(seed);
   const out = [];
-  for (let i = 0; i < count; i++) out.push(factory(theme, rng, scaleHint));
+  for (let i = 0; i < count; i++) out.push(factory(theme, rng, scaleHint, opts));
   return out;
 }
