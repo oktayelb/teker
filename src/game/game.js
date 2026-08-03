@@ -21,7 +21,7 @@ import { createChassis } from '../vehicle/chassis.js';
 import { resolveVehicleContacts } from '../vehicle/contacts.js';
 import { Loop } from '../core/loop.js';
 import { ModeManager } from '../core/modes.js';
-import { input } from '../core/input.js';
+import { input, BINDINGS } from '../core/input.js';
 import { events } from '../core/events.js';
 import { audio } from '../audio/audio.js';
 import { ui } from '../ui/index.js';
@@ -349,13 +349,57 @@ export class Game {
       if (!down) return;
       // Read raw key events rather than the input state, so these still work
       // while the human's driving controls are locked during a cutscene.
-      if (code === 'KeyC') {
+      // Matched against BINDINGS rather than literals so rebinding a key at
+      // runtime moves the global keys with everything else.
+      const bound = (action) => BINDINGS[action]?.includes(code);
+
+      if (bound('cycleCamera')) {
         const next = this.camera.cycleRig(1);
         events.emit('ui:subtitle', { text: `KAMERA · ${next}`, duration: 1.1, tone: 'system' });
       }
-      if (code === 'Backquote') this.toggleDebugPanel();
-      if (code === 'Escape' || code === 'KeyP') this.togglePause();
+      if (bound('headlights')) this.toggleHeadlights();
+      if (bound('debugPanel')) this.toggleDebugPanel();
+      if (bound('pause')) this.togglePause();
     });
+  }
+
+  /**
+   * Headlights, on the player's car.
+   *
+   * WHY THIS LIVES ON `Game` AND NOT ON A MODE
+   * ------------------------------------------
+   * Two reasons, and the second is the load-bearing one.
+   *
+   * 1. Lights are not a rule, they are a property of the car — the same thing
+   *    in a race, in free roam and in a cutscene. A mode that owned this key
+   *    would have to be copied into every other mode, and the one mode that
+   *    most needs it is `RaceMode`: parkur 3 runs at night and the whole stage
+   *    turns on the moment the rig dies and the headlights come up.
+   * 2. `_wireGlobalKeys` reads the raw `input:key` event, which is the only
+   *    channel that survives `input.setLocked(true)`. During the failed reset
+   *    the human's driving inputs are frozen; being unable to see is part of
+   *    that scene, being unable to touch the light switch is a broken game.
+   *
+   * The chassis is the single source of truth (`chassis.headlightsOn`), so the
+   * intro switching them on during the blackout leaves this key in sync for
+   * free — press F afterwards and they go *off*, which is what the player just
+   * asked for. Nothing caches a second copy of the state anywhere.
+   *
+   * @param {boolean} [force] set explicitly instead of toggling
+   * @returns {boolean|null} the new state, or null if there is no car
+   */
+  toggleHeadlights(force = undefined) {
+    const chassis = this.player?.chassis;
+    if (!chassis?.setHeadlights) return null;
+    const on = force === undefined ? !chassis.headlightsOn : !!force;
+    chassis.setHeadlights(on);
+    events.emit('player:headlights', { on });
+    events.emit('ui:subtitle', {
+      text: `FARLAR · ${on ? 'AÇIK' : 'KAPALI'}`,
+      duration: 1.1,
+      tone: 'system',
+    });
+    return on;
   }
 
   /**

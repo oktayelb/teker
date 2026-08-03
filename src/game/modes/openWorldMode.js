@@ -14,6 +14,12 @@
  *
  * The rival cars are left running on their track on purpose. Drive back and
  * they are still going round, still racing a race that ended for you.
+ *
+ * The two systems it does own — `ChaseSystem` and `PatrolSystem` — are systems
+ * rather than modes for the same reason: starting or ending either one never
+ * unloads anything, so the player never stops driving. Both are constructed
+ * unconditionally and both decide for themselves whether they are allowed to
+ * do anything yet. This mode holds no opinion about how far into the story it is.
  */
 
 import * as THREE from 'three';
@@ -21,6 +27,7 @@ import { Mode } from '../../core/modes.js';
 import { AiDriver } from '../../vehicle/ai.js';
 import { events, Subscriptions } from '../../core/events.js';
 import { ChaseSystem } from '../chase.js';
+import { PatrolSystem } from '../patrol.js';
 import { OPEN_WORLD } from '../../config/gameplay.js';
 import { clamp01 } from '../../core/mathx.js';
 
@@ -32,6 +39,8 @@ export class OpenWorldMode extends Mode {
     this.subs = new Subscriptions();
     /** @type {ChaseSystem|null} */
     this.chase = null;
+    /** @type {PatrolSystem|null} */
+    this.patrol = null;
     this.elapsed = 0;
     /** Landmarks the player has stood in. */
     this.discovered = new Set();
@@ -71,6 +80,12 @@ export class OpenWorldMode extends Mode {
     g.ui.hud.setHeat(null);
 
     this.chase = new ChaseSystem(g, { target: g.player });
+    // Patrols arm themselves off `PATROL.armedBy`, so constructing one here
+    // says nothing about whether the story is over — during the races and the
+    // scripted chase this object listens and does nothing. It is given the
+    // chase because a patrol that sees you does not pursue you; it hands its
+    // cruiser to `ChaseSystem#start({ adopt })` and stops existing.
+    this.patrol = new PatrolSystem(g, { target: g.player, chase: this.chase });
 
     events.emit('openWorld:entered', { keepPlayer: !!params.keepPlayer });
   }
@@ -101,6 +116,8 @@ export class OpenWorldMode extends Mode {
 
   async exit() {
     this.subs.dispose();
+    this.patrol?.stop();
+    this.patrol = null;
     this.chase?.stop();
     this.chase = null;
     this._ghostRacers.length = 0;
@@ -120,6 +137,7 @@ export class OpenWorldMode extends Mode {
   fixedUpdate(dt) {
     this.elapsed += dt;
     this.chase?.fixedUpdate(dt);
+    this.patrol?.fixedUpdate(dt);
   }
 
   update(dt) {
@@ -129,6 +147,7 @@ export class OpenWorldMode extends Mode {
     g.ui.hud.setSpeed(g.player.speedKmh);
     g.ui.hud.setGear(g.player.gear);
     this.chase?.update(dt);
+    this.patrol?.update(dt);
     this._checkLandmarks();
   }
 

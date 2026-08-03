@@ -350,6 +350,12 @@ export const CHASE = {
   visionConeDeg: 62,
   /** Line of sight is blocked by trees/rocks/terrain within this radius. */
   occlusionCheck: true,
+  /**
+   * Closer than this and the raycast is skipped entirely. Two cars this near
+   * each other are not having their outcome decided by a trunk between them,
+   * and the grid walk is the only expensive part of the whole check.
+   */
+  occlusionMinDistance: 12,
 
   /**
    * HEAT: 1 = fully on your tail, 0 = lost you.
@@ -384,6 +390,133 @@ export const CHASE = {
 
   /** Siren light flash rate, Hz. */
   sirenFlashHz: 2.6,
+};
+
+// ---------------------------------------------------------------------------
+// PATROLS — the world does not stop being policed
+// ---------------------------------------------------------------------------
+
+/**
+ * One cruiser, sometimes, working the old parkour ribbons.
+ *
+ * The scripted chase is a scene: it starts when the story says so, it is
+ * survivable by design, and it ends. A patrol is the opposite of all three. It
+ * is not looking for you, it does not know where you are, and if it never sees
+ * you it drives off and is deleted. That difference is the entire feature —
+ * what it buys is that the open world stops being safe without ever becoming a
+ * chase you did not choose.
+ *
+ * WHY THE OLD TRACKS
+ * ------------------
+ * Because they are roads, and a police car on a road is not a coincidence that
+ * needs explaining. Cruising the parkours you raced this morning also says
+ * something the game cannot say any other way: they are checking the road you
+ * left. `AiDriver` already races a `track`, so a patrol route costs nothing to
+ * implement and reads as intent.
+ *
+ * COST IS FIXED, NOT CUMULATIVE
+ * -----------------------------
+ * At most `maxActive` exist at once, and one that has been `despawnDistance`
+ * away for `despawnHold` seconds is removed. Roam for an hour and the game is
+ * running exactly as much as it was in the first minute.
+ */
+export const PATROL = {
+  /**
+   * Patrols arm themselves off the story ending, exactly as the forest and the
+   * wildlife do — see `TREES.breakableBy` and `WILDLIFE.armedBy`. Nobody
+   * *switches them on*: during the races and the scripted first chase this
+   * system is constructed, listening, and doing nothing at all.
+   *
+   * `intro:finished` is the second entry for the no-story paths (`?skip=intro`,
+   * the free-roam menu option), where no chase ever happens and the roads would
+   * otherwise stay empty forever.
+   */
+  armedBy: ['chase:escaped', 'intro:finished'],
+
+  /** Cruisers alive at once. One. Two is an escort, and an escort is a chase. */
+  maxActive: 1,
+  /** Seconds after arming before the first one can appear, [min, max]. */
+  firstDelay: [22, 50],
+  /** Seconds between attempts once the road is clear again, [min, max]. */
+  interval: [75, 165],
+  /**
+   * Where one may appear, metres from the player.
+   *
+   * `min` has to clear `alarm.range` by a margin, or a patrol materialises
+   * already audible and the arrival reads as a spawn rather than as a car that
+   * drove here. Everything past `visionRange` is automatically out of sight.
+   */
+  spawnDistance: { min: 300, max: 540 },
+  /** Far enough away to stop mattering… */
+  despawnDistance: 620,
+  /** …and gone for this long, so a player circling the boundary does not thrash it. */
+  despawnHold: 10,
+  /** Throttle multiplier. They are patrolling, not qualifying. */
+  pace: 0.55,
+
+  /**
+   * Perception. Deliberately shorter and narrower than `CHASE`: a car sweeping
+   * a road is not scanning the treeline for you, and a patrol that spotted you
+   * as readily as a unit dispatched to find you would make the whole open world
+   * a corridor.
+   */
+  vision: { range: 165, coneDeg: 52 },
+  /**
+   * Range multipliers by whether the player is running lit.
+   *
+   * This is the reason `F` exists. Lights off is the baseline, so nothing is
+   * given away for free; switching them on is what costs you, and it costs you
+   * half again your visibility. At night that is a genuine trade, because the
+   * forest with no lights is close to undrivable — which is the point. Not
+   * applied to the scripted chase: those cops were told where you are.
+   */
+  headlightRange: { lit: 1.5, dark: 1.0 },
+
+  /**
+   * THE ALARM. Two states, and the player must never confuse them.
+   *
+   *   near  — a siren somewhere off to your left, a light bar through the
+   *           trunks, the pursuit meter waking up and stopping short.
+   *   seen  — the meter fills, the chase system takes the car over, and the
+   *           siren is behind you instead of somewhere.
+   */
+  alarm: {
+    /** Inside this you can hear them. Comfortably outside their vision range. */
+    range: 285,
+    /** The nearby meter never climbs past this. Critical is 0.8 — it must not read as caught. */
+    heatCeiling: 0.5,
+    /** …and it only appears inside this, so a patrol two fields away is silent. */
+    meterFrom: 240,
+    /** Closer than this and the siren rattles the camera, as the chase's do. */
+    shakeFrom: 45,
+  },
+
+  /**
+   * THE TREE LESSON.
+   *
+   * Felling a pine onto the car and sitting still under it is the best thing in
+   * the game and nothing has ever told the player it is possible. This is the
+   * moment to: trunks became fellable on exactly the event that armed the
+   * patrols (`TREES.breakableBy`), so the first time one of them sees you is
+   * the first time the answer exists.
+   *
+   * Said in the world's voice, twice at most, ever, and never when there is no
+   * forest within reach to say it about — advice you cannot act on is worse
+   * than silence.
+   */
+  hint: {
+    /** Seconds after being spotted. Long enough that the sighting lands first. */
+    delay: 4.5,
+    /** Times in a save. Two: one to hear it, one to remember it. */
+    maxTimes: 2,
+    /** Fellable trunks needed within `treeRadius` metres before it will fire. */
+    minTrees: 3,
+    treeRadius: 70,
+    lines: [
+      { text: 'Bir ağacı devirecek kadar sert vur.', duration: 3.4 },
+      { text: 'Sonra hiç kıpırdama.', duration: 3.0 },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
