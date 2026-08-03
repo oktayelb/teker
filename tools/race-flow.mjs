@@ -42,20 +42,20 @@ async function open(query = '') {
     console.log('[PAGEERROR]', e.message);
   });
   await page.goto(BASE + query, { waitUntil: 'load' });
-  await page.waitForFunction('globalThis.TEKERLEK?.game?.loop?.running === true', { timeout: 60000 });
+  await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   await page.evaluate(() => {
     window.__log = [];
     for (const ev of ['race:started', 'race:finished', 'race:dismissed', 'mode:entered', 'intro:phase'])
-      TEKERLEK.events.on(ev, (p) => window.__log.push(`${ev}:${p?.trackId || p?.name || p?.phase || ''}`));
+      TEKER.events.on(ev, (p) => window.__log.push(`${ev}:${p?.trackId || p?.name || p?.phase || ''}`));
   });
   return page;
 }
 
 const probe = (page) =>
   page.evaluate(() => {
-    const m = TEKERLEK.game.modes.current;
+    const m = TEKER.game.modes.current;
     return {
-      mode: TEKERLEK.game.modes.currentName,
+      mode: TEKER.game.modes.currentName,
       track: m?.track?.id ?? null,
       state: m?.state ?? null,
       // How black the screen is right now, 0..1.
@@ -72,8 +72,8 @@ const probe = (page) =>
 /** Force the player across the line: fixedUpdate picks it up and finishes. */
 const finishRace = (page) =>
   page.evaluate(() => {
-    const m = TEKERLEK.game.modes.current;
-    m.progress.find((x) => x.vehicle === TEKERLEK.game.player).lap = m.laps;
+    const m = TEKER.game.modes.current;
+    m.progress.find((x) => x.vehicle === TEKER.game.player).lap = m.laps;
   });
 
 try {
@@ -93,7 +93,7 @@ try {
   let s = await probe(page);
   check('race 1 holds on the grid before the countdown', s.state === 'grid' || s.state === 'countdown', s.state);
 
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 20000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 20000 });
   console.log('  race 1 running.');
 
   await finishRace(page);
@@ -122,7 +122,7 @@ try {
   check('ENTER closes the panel', !s.open.includes('dim'), s.open);
 
   // Through the gap: black screen, then the new grid, then the lights.
-  await page.waitForFunction('TEKERLEK.game.modes.current?.track?.id === "track2"', { timeout: 25000 });
+  await page.waitForFunction('TEKER.game.modes.current?.track?.id === "track2"', { timeout: 25000 });
   s = await probe(page);
   check('race 2 grid is NOT already racing when it appears', s.state !== 'racing', s.state);
 
@@ -134,7 +134,7 @@ try {
   s = await probe(page);
   check('screen is visible before the countdown ends', s.state !== 'racing', `state=${s.state} fade=${s.fade}`);
 
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 20000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 20000 });
   console.log('  race 2 running.');
   console.log('  events:', (await probe(page)).log);
   await page.close();
@@ -150,7 +150,7 @@ try {
 }
 
 async function page3Checks(p3) {
-  await p3.waitForFunction('TEKERLEK.game.modes.current?.track?.id === "track3"', { timeout: 30000 });
+  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "track3"', { timeout: 30000 });
   let s = await probe(p3);
   check('no title screen — straight into parkur 3', !s.open.includes('scrim'), s.open);
   check('on track3', s.track === 'track3', String(s.track));
@@ -162,11 +162,11 @@ async function page3Checks(p3) {
   s = await probe(p3);
   check('parkur 3 fades in before it starts', s.state !== 'racing', `state=${s.state} fade=${s.fade}`);
 
-  await p3.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 20000 });
+  await p3.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 20000 });
   const d = await p3.evaluate(() => ({
-    phase: TEKERLEK.game.modes.current ? window.__director?.phase : null,
-    races: TEKERLEK.game.flags.racesCompleted,
-    showResults: TEKERLEK.game.modes.current.showResults,
+    phase: TEKER.game.modes.current ? window.__director?.phase : null,
+    races: TEKER.game.flags.racesCompleted,
+    showResults: TEKER.game.modes.current.showResults,
   }));
   check('director counts this as the third race', d.races === 2, `racesCompleted=${d.races}`);
   check('parkur 3 has no results screen — the story ends it', d.showResults === false, String(d.showResults));
@@ -174,7 +174,7 @@ async function page3Checks(p3) {
   // The whole point of the shortcut: the director must still be attached, so
   // driving off the edge still breaks the game open instead of doing nothing.
   await p3.evaluate(() => {
-    const v = TEKERLEK.game.player;
+    const v = TEKER.game.player;
     v.position.set(v.position.x + 600, v.position.y, v.position.z + 600);
   });
   await p3.waitForFunction("window.__log.join().includes('intro:phase:breakout')", { timeout: 20000 })

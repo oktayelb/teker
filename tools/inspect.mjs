@@ -38,7 +38,7 @@ try {
 
   const diag = await page.evaluate(() => {
     const c = document.getElementById('game-canvas');
-    const g = globalThis.TEKERLEK;
+    const g = globalThis.TEKER;
     const gl = c?.getContext('webgl2') || c?.getContext('webgl');
     const r = g?.game?.renderer;
     // Read the centre pixel of the actual drawing buffer.

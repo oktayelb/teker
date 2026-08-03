@@ -14,7 +14,7 @@ await page.goto(`http://localhost:${PORT}/index.html?scene=race1`, { waitUntil:'
 await new Promise(r=>setTimeout(r,9000));
 
 const out = await page.evaluate(async () => {
-  const g = TEKERLEK.game;
+  const g = TEKER.game;
   const player = g.player;
   const rival = g.vehicles.find(v => v !== player);
   if (!rival) return { error: 'no rival spawned' };
@@ -34,7 +34,7 @@ const out = await page.evaluate(async () => {
 
   const before = { x: rival.position.x, z: rival.position.z, speed: rival.speed };
   let contactEvents = 0;
-  const off = TEKERLEK.events.on('vehicle:contact', () => contactEvents++);
+  const off = TEKER.events.on('vehicle:contact', () => contactEvents++);
 
   for (let i = 0; i < 200; i++) g.loop.onFixed(1/120, g.loop);
   off();
@@ -52,7 +52,7 @@ console.log('car-on-car:', JSON.stringify(out));
 
 // Barrier clearance while actually driving: hug the right-hand barrier.
 const hug = await page.evaluate(async () => {
-  const g = TEKERLEK.game;
+  const g = TEKER.game;
   const t = g.world.getTrack('track1');
   const THREE = await import('three');
   const i = t.sampleIndexAt(0.3);
@@ -63,7 +63,7 @@ const hug = await page.evaluate(async () => {
     t.px[i] + t.rx[i]*off, t.py[i]+0.5, t.pz[i] + t.rz[i]*off
   ), Math.atan2(t.tx[i], t.tz[i]));
   g.player.velocity.set(Math.sin(g.player.heading)*30, 0, Math.cos(g.player.heading)*30);
-  const offEv = TEKERLEK.events.on('vehicle:collision', () => touches++);
+  const offEv = TEKER.events.on('vehicle:collision', () => touches++);
   for (let k = 0; k < 600; k++) g.loop.onFixed(1/120, g.loop);
   offEv();
   const q = t.query(g.player.position.x, g.player.position.z, {});

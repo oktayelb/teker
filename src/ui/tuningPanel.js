@@ -117,7 +117,7 @@ export class TuningPanel {
 
   _header() {
     const h = document.createElement('div');
-    h.textContent = 'TEKERLEK · TUNING  [`] to close';
+    h.textContent = 'TEKER · TUNING  [`] to close';
     Object.assign(h.style, {
       fontWeight: 'bold',
       letterSpacing: '0.08em',

@@ -43,7 +43,7 @@ const _spawn = new THREE.Vector3();
 const _to = new THREE.Vector3();
 
 /** Where "the player has already been taught this" survives a reload. */
-const PROGRESS_KEY = 'tekerlek.progress.v1';
+const PROGRESS_KEY = 'teker.progress.v1';
 
 export class PatrolSystem {
   /**

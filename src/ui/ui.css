@@ -1,5 +1,5 @@
 /* ===========================================================================
-   TEKERLEK — UI LAYER
+   TEKER — UI LAYER
    ---------------------------------------------------------------------------
    A CRT terminal pretending to be a 1997 racing game's overlay: monospace,
    hard edges, no border-radius anywhere, no soft shadows, few colours.
@@ -269,7 +269,7 @@ body {
 }
 
 /* ===========================================================================
-   LOGO — "Tek" | "erlek"
+   LOGO — "Tek" | "er"
    ---------------------------------------------------------------------------
    The split is the thesis of the game: *tek* is Turkish for "the only one".
    At --g:0 it must still read as one word, but wrong — a hairline seam and a
@@ -338,7 +338,7 @@ body {
     skewX(calc(var(--g) * -7deg));
 }
 
-/* "erlek": stays put, drifts slightly the other way so the word splits apart. */
+/* "er": stays put, drifts slightly the other way so the word splits apart. */
 .tk-logo-rest {
   transform: translate(calc(var(--g) * 0.05em), calc(var(--g) * 0.02em));
 }

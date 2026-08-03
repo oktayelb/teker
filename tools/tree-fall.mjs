@@ -44,14 +44,14 @@ try {
   });
   // Free roam: a whole forest, no race rules in the way.
   await page.goto(`http://localhost:${PORT}/index.html?skip=intro`, { waitUntil: 'load' });
-  await page.waitForFunction('globalThis.TEKERLEK?.game?.loop?.running === true', { timeout: 60000 });
-  await page.waitForFunction('TEKERLEK.game.player != null', { timeout: 40000 });
+  await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
+  await page.waitForFunction('TEKER.game.player != null', { timeout: 40000 });
 
   await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     window.__log = [];
     for (const ev of ['tree:damaged', 'tree:felled', 'vehicle:disguised', 'vehicle:undisguised'])
-      TEKERLEK.events.on(ev, (p) => window.__log.push(`${ev}:${p.kind ?? ''}`));
+      TEKER.events.on(ev, (p) => window.__log.push(`${ev}:${p.kind ?? ''}`));
 
     /** Find a fellable tree the player can be aimed at. */
     window.__pickTree = () => {
@@ -119,7 +119,7 @@ try {
   // TREES.breakableBy). Everything below depends on that having happened.
   console.log('\n— the forest is armed at all —');
   check('free roam arms the damage model at boot',
-    await page.evaluate(() => TEKERLEK.game.world.trees.breakable === true));
+    await page.evaluate(() => TEKER.game.world.trees.breakable === true));
 
   // -- 1. a gentle nudge must not damage anything ---------------------------
   //
@@ -128,7 +128,7 @@ try {
   // the terrain rather than the threshold.
   console.log('\n— a nudge below the impact floor —');
   const nudge = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const c = window.__pickTree();
     window.__t = c;
     const before = c.damage || 0;
@@ -149,7 +149,7 @@ try {
   // real thing with a real car.
   console.log('\n— a moderate hit —');
   const model = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const c = window.__t;
     const cap = c.radius * 165000;
     g.world.onImpact(g.player, c, cap * 0.4);
@@ -188,11 +188,11 @@ try {
 
   // Start the chase — that is what arms the disguise.
   await page.evaluate(() => {
-    const m = TEKERLEK.game.modes.current;
+    const m = TEKER.game.modes.current;
     window.__chase = m.startChase ? m.startChase({ rig: 'chaseWide' }) : null;
   });
   await sleep(400);
-  check('the chase arms the disguise', await page.evaluate(() => TEKERLEK.game.world.trees.armed === true));
+  check('the chase arms the disguise', await page.evaluate(() => TEKER.game.world.trees.armed === true));
 
   // Fell another one, now that there is something to hide from.
   await page.evaluate(() => {
@@ -222,7 +222,7 @@ try {
   // otherwise be stuck with it. Both pedals together, held, is the way out.
   console.log('\n— shrugging the cover off —');
   const shed = await page.evaluate(async () => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const scene = g.renderer.scene;
     const inWorld = () => scene.children.filter((o) => o.name?.startsWith('fallen:')).length;
@@ -261,7 +261,7 @@ try {
   if (SHOTS) {
     // Pull away and look back at what was left behind.
     await page.evaluate(async () => {
-      const g = TEKERLEK.game;
+      const g = TEKER.game;
       g.camera.setRig('chaseWide');
       const release = g.input.pushOverride((s) => { s.throttle = 1; });
       await new Promise((r) => setTimeout(r, 3200));
@@ -274,7 +274,7 @@ try {
   // -- 4b. a damaged tree must LOOK damaged ---------------------------------
   console.log('\n— a damaged tree is visibly different —');
   const look = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const c = window.__pickTree();
     if (!c) return null;
     const read = () => {
@@ -315,7 +315,7 @@ try {
     // Park the player looking at the damaged tree so it can be eyeballed
     // against its healthy neighbours.
     await page.evaluate(() => {
-      const g = TEKERLEK.game;
+      const g = TEKER.game;
       const c = window.__dmg;
       const v = g.player;
       const a = Math.atan2(c.x, c.z);
@@ -332,7 +332,7 @@ try {
   // -- 5. the disguise is what the cops care about --------------------------
   console.log('\n— what the cops see —');
   const seen = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const mode = g.modes.current;
     const chase = window.__chase || (mode.startChase ? mode.startChase({ rig: 'chaseWide' }) : null);
     if (!chase) return null;
@@ -373,7 +373,7 @@ try {
 
   if (SHOTS) {
     await page.evaluate(() => {
-      const g = TEKERLEK.game;
+      const g = TEKER.game;
       g.player.velocity.set(0, 0, 0);
       g.camera.setRig('chaseWide');
     });
@@ -384,7 +384,7 @@ try {
   // -- 6. the forest must survive the car being torn down -------------------
   console.log('\n— despawn the wearer —');
   const survived = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const mesh = window.__t.mesh;
     g.despawnVehicle(g.player);
     // If the shared instanced geometry had been disposed, its attributes go.

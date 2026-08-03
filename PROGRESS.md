@@ -1,4 +1,4 @@
-# TEKERLEK — Build Progress
+# TEKER — Build Progress
 
 > **Resume file.** If a session is interrupted, read this top-to-bottom and continue
 > at the first unchecked phase. Each phase is self-contained and leaves the game runnable.
@@ -42,7 +42,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P9 — Open world**: free roam, landmarks, points of interest
 - [x] **P10 — Chase**: cop AI, siren lights, heat/escape system
 - [x] **P11 — Audio**: procedural WebAudio (engine, siren, glitch, ambience)
-- [x] **P12 — UI**: Tek|erlek logo, HUD, screens, subtitle/narrative channel
+- [x] **P12 — UI**: Tek|er logo, HUD, screens, subtitle/narrative channel
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 

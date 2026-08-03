@@ -44,13 +44,13 @@ const open = async (query) => {
     console.log('[PAGEERROR]', e.message);
   });
   await page.goto(`http://localhost:${PORT}/index.html${query}`, { waitUntil: 'load' });
-  await page.waitForFunction('globalThis.TEKERLEK?.game?.loop?.running === true', { timeout: 60000 });
+  await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   return page;
 };
 
 const snapshot = (page) =>
   page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     return {
       state: g.modes.current?.state ?? null,
       theme: g.renderer.theme?.label ?? '?',
@@ -76,7 +76,7 @@ try {
   // =========================================================================
   console.log('\n— parkur 3: the sky, and the grid —');
   const p3 = await open('?start=race3');
-  await p3.waitForFunction('TEKERLEK.game.modes.current?.track?.id === "track3"', { timeout: 40000 });
+  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "track3"', { timeout: 40000 });
 
   let s = await snapshot(p3);
   check('parkur 3 runs at night', s.theme === 'Night', `theme=${s.theme}`);
@@ -95,7 +95,7 @@ try {
 
   if (SHOTS) await p3.screenshot({ path: `${SHOTS}/race3-night.png` });
 
-  await p3.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 30000 });
+  await p3.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 30000 });
   s = await snapshot(p3);
   check('cars are released at GO', s.cars.every((c) => !c.disabled));
   await sleep(1500);
@@ -109,7 +109,7 @@ try {
   await sleep(1200);
   await page.keyboard.press('Enter'); // BAŞLA
   // Wait for the countdown to be on screen, then pause it.
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "countdown"', { timeout: 30000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "countdown"', { timeout: 30000 });
   await sleep(400);
   await page.keyboard.press('Escape');
   await sleep(500);
@@ -132,7 +132,7 @@ try {
   await sleep(700);
   const resumed = await snapshot(page);
   check('resuming unpauses', resumed.paused === false);
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 20000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 20000 });
   console.log('    countdown resumed and the race started.');
 } finally {
   await browser.close();
