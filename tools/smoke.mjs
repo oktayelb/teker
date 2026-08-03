@@ -1178,6 +1178,239 @@ section('8. saved sound settings actually reach the mix');
 }
 
 // ---------------------------------------------------------------------------
+section('9. ground cover — grass that is actually there');
+
+// Grass is a pool that follows the camera, not scatter (see world/groundCover.js).
+// None of it can be seen from a screenshot in this environment, so everything
+// the eye would have caught is asserted numerically instead: that the blades
+// are ON the ground rather than floating over it, standing on the slope rather
+// than through it, and absent from the road, the cliffs and the steep ground.
+{
+  const { OPEN_WORLD } = await import('../src/config/gameplay.js');
+  const { GroundCover } = await import('../src/world/groundCover.js');
+  const GC = OPEN_WORLD.groundCover;
+  const cover = world.groundCover;
+  const terrain = world.terrain;
+
+  ok('the world grows ground cover', !!cover);
+  ok(
+    'the pool is the configured size',
+    cover.count === GC.bands.reduce((n, b) => n + b.count, 0),
+    `${cover.count} tufts`
+  );
+  ok('grass is no longer scattered', !world.scatter.root.getObjectByName('scatter:grass:0'));
+
+  /** Every visible tuft, decomposed out of the instance matrices. */
+  const m = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const _n9 = new THREE.Vector3();
+  //
+  // NOTE the scale is measured off the raw basis column rather than taken from
+  // `decompose`. A hidden instance is a zero matrix, and this three returns
+  // scale (1,1,1) with an identity rotation for anything whose determinant is
+  // zero — so decompose reports every hidden tuft as a full-size one sitting at
+  // the origin, and every assertion below quietly becomes a lie.
+  function visible(cvr) {
+    const out = [];
+    for (const g of cvr._groups) {
+      for (let i = 0; i < g.items.length; i++) {
+        g.mesh.getMatrixAt(i, m);
+        const e = m.elements;
+        if (Math.hypot(e[0], e[1], e[2]) < 1e-4) continue;
+        m.decompose(p, q, s);
+        out.push({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          scale: s.x,
+          up: up.set(0, 1, 0).applyQuaternion(q).clone(),
+          radius: g.band.radius,
+          size: g.items[i].size,
+        });
+      }
+    }
+    return out;
+  }
+
+  // Somewhere out in the forest, well clear of the tracks.
+  const spot = new THREE.Vector3(430, 0, -260);
+  spot.y = terrain.heightAt(spot.x, spot.z);
+  cover.update(1 / 60, spot);
+  let live = visible(cover);
+  ok('grass appears around the camera', live.length > 400, `${live.length} tufts visible`);
+
+  // ROOTED. A blade whose origin is not on the terrain is a floating card, and
+  // that is exactly what this replaced.
+  let worstDrop = 0;
+  let worstTilt = 0;
+  for (const t of live) {
+    worstDrop = Math.max(worstDrop, Math.abs(t.y + GC.sink - terrain.heightAt(t.x, t.z)));
+    terrain.normalAt(t.x, t.z, _n9);
+    worstTilt = Math.max(worstTilt, Math.abs(1 - t.up.dot(_n9)));
+  }
+  // A millimetre, not zero: instance matrices live in a Float32Array, so the
+  // position read back is the one the GPU will use rather than the one we
+  // composed. Anything a floating card would show up as is orders of
+  // magnitude above this.
+  ok('every tuft is rooted in the terrain', worstDrop < 1e-3, `worst gap ${worstDrop.toExponential(1)}m`);
+  ok(
+    'every tuft stands on the terrain normal',
+    worstTilt < 1e-6,
+    `worst deviation ${worstTilt.toExponential(1)}`
+  );
+
+  // The placement rules, all of which are invisible until they are wrong.
+  let onCliff = 0;
+  let tooSteep = 0;
+  let outsideBand = 0;
+  let unfaded = 0;
+  for (const t of live) {
+    const surface = terrain.surfaceAt(t.x, t.z);
+    if (!GC.surfaces.includes(surface)) onCliff++;
+    if (terrain.slopeAt(t.x, t.z) > GC.maxSlope) tooSteep++;
+    const d = Math.hypot(t.x - spot.x, t.z - spot.z);
+    if (d > t.radius) outsideBand++;
+    // Nothing pops in: a tuft arriving at the rim must still be almost nothing.
+    if (d > t.radius * 0.97 && t.scale > t.size * 0.15) unfaded++;
+  }
+  ok('no grass on cliffs or mud', onCliff === 0, `${onCliff} bad surfaces`);
+  ok('no grass on slopes it could not root in', tooSteep === 0, `${tooSteep} over ${GC.maxSlope}`);
+  ok('every tuft is inside its own band', outsideBand === 0, `${outsideBand} strays`);
+  ok('nothing arrives at full size', unfaded === 0, `${unfaded} would pop in`);
+
+  // ON THE ROAD IS THE ONE PLACE IT MUST NOT BE. Park on the start line of
+  // parkur 1 — the tightest case, because the camera is then surrounded by it.
+  const t1 = world.getTrack('track1');
+  const onTrack = new THREE.Vector3(t1.px[0], 0, t1.pz[0]);
+  onTrack.y = terrain.heightAt(onTrack.x, onTrack.z);
+  cover.update(1 / 60, onTrack);
+  live = visible(cover);
+  let onRoad = 0;
+  let nearest = Infinity;
+  const scratch = {};
+  for (const t of live) {
+    for (const tr of world._trackList) {
+      const query = tr.query(t.x, t.z, scratch);
+      if (!query) continue;
+      const edge = query.dist - query.halfWidth;
+      nearest = Math.min(nearest, edge);
+      if (edge < GC.trackClearance) onRoad++;
+    }
+  }
+  ok('grass never grows on the racing surface', onRoad === 0, `${onRoad} tufts on tarmac`);
+  ok(
+    'the verge is bare for the configured clearance',
+    nearest >= GC.trackClearance,
+    `nearest blade ${nearest.toFixed(2)}m past the edge, clearance ${GC.trackClearance}m`
+  );
+  ok('there is still grass beside the track', live.length > 200, `${live.length} tufts`);
+
+  // Drive, do not teleport: the pool must follow without changing size and
+  // without allocating. This is the whole reason it is a pool.
+  const before = cover.count;
+  const walk = onTrack.clone();
+  for (let i = 0; i < 120; i++) {
+    walk.x += 0.9;
+    walk.z += 0.4;
+    walk.y = terrain.heightAt(walk.x, walk.z);
+    cover.update(1 / 60, walk);
+  }
+  live = visible(cover);
+  let strays = 0;
+  for (const t of live) if (Math.hypot(t.x - walk.x, t.z - walk.z) > t.radius) strays++;
+  ok('driving recycles rather than reallocates', cover.count === before, `${cover.count} tufts`);
+  ok('the pool stays centred on the camera', strays === 0, `${strays} left behind`);
+
+  // Determinism. Same seed and same camera path, twice, matrix for matrix.
+  {
+    const mk = () =>
+      new GroundCover({
+        terrain,
+        materials,
+        theme,
+        seed: 0x7e4e17 ^ 0x6c0f,
+        avoid: world._trackAvoidance(GC.trackClearance),
+      }).build();
+    const a = mk();
+    const b = mk();
+    const path = [spot, new THREE.Vector3(spot.x + 30, 0, spot.z + 12), onTrack];
+    for (const point of path) {
+      a.update(1 / 60, point);
+      b.update(1 / 60, point);
+    }
+    const A = visible(a);
+    const B = visible(b);
+    let same = A.length === B.length && A.length > 0;
+    for (let i = 0; same && i < A.length; i++) {
+      same = A[i].x === B[i].x && A[i].y === B[i].y && A[i].scale === B[i].scale;
+    }
+    ok('same seed, same grass', same, `${A.length} tufts compared`);
+    a.dispose();
+    b.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+section('10. the wind is in the shader, and only in the grass');
+
+// Vertex wind is `onBeforeCompile` surgery (src/render/wind.js) and there is no
+// GL context here to compile it. What CAN be checked is the two ways this fails
+// silently: the injection missing its anchor, and the material sharing a
+// compiled program with something that must not wave.
+{
+  const { MaterialLibrary } = await import('../src/render/materials.js');
+  const lib = new MaterialLibrary(theme, preset);
+  const grass = lib.get('grass');
+  const foliage = lib.get('foliage');
+
+  // Stand-in for three's shader object, carrying the anchors both passes need.
+  const fake = () => ({
+    uniforms: {},
+    vertexShader: 'void main() {\n#include <begin_vertex>\n#include <fog_vertex>\n}',
+    fragmentShader: 'void main() {\n#include <map_fragment>\n}',
+  });
+
+  const shader = fake();
+  grass.onBeforeCompile(shader, null);
+  ok('the wind reaches the vertex shader', /transformed\.xz \+= uWindDir/.test(shader.vertexShader));
+  ok('…anchored to begin_vertex, before projection', shader.vertexShader.indexOf('uWindDir *') < shader.vertexShader.indexOf('#include <fog_vertex>'));
+  ok('…and it still runs the PSX snap', /uSnapResolution/.test(shader.vertexShader));
+  for (const u of ['uWindTime', 'uWindStrength', 'uWindScale', 'uWindDir']) {
+    ok(`uniform ${u} is bound`, !!shader.uniforms[u]);
+  }
+  // The roots. `transformed.y` squared is what welds the base of a blade to the
+  // ground; drop it and the whole tuft slides sideways in the wind.
+  ok('the bend is zero at the root', /windBend \* windBend/.test(shader.vertexShader));
+
+  // Two MeshLambertMaterials with the same parameters share a compiled program.
+  // If the grass reported the plain PSX cache key, three would hand the terrain
+  // the wind shader and the ground itself would start waving.
+  ok(
+    'the grass does not share a program with the still world',
+    grass.customProgramCacheKey() !== foliage.customProgramCacheKey(),
+    `${grass.customProgramCacheKey()} vs ${foliage.customProgramCacheKey()}`
+  );
+
+  const plain = fake();
+  foliage.onBeforeCompile(plain, null);
+  ok('nothing else got the wind', !/uWindDir/.test(plain.vertexShader));
+
+  // The phase is a number the world drives; a stuck one is grass frozen mid-gust.
+  lib.setWindTime(4.25);
+  ok('the world can advance the wind', lib._wind.uWindTime.value === 4.25);
+  lib.configureWind({ strength: 0.3, scale: 0.06, direction: { x: 3, z: 4 } });
+  ok(
+    'the wind direction is normalised',
+    Math.abs(lib._wind.uWindDir.value.length() - 1) < 1e-6,
+    `(${lib._wind.uWindDir.value.x.toFixed(2)}, ${lib._wind.uWindDir.value.y.toFixed(2)})`
+  );
+  lib.dispose();
+}
+
+// ---------------------------------------------------------------------------
 console.log(
   `\n${failures === 0 ? '\x1b[32m' : '\x1b[31m'}${checks - failures}/${checks} checks passed\x1b[0m\n`
 );

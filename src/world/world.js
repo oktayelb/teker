@@ -23,6 +23,7 @@ import { CollisionGrid } from './collision.js';
 import { TrackLighting } from './lighting.js';
 import { Trees } from './trees.js';
 import { Wildlife } from './wildlife.js';
+import { GroundCover } from './groundCover.js';
 import { OPEN_WORLD } from '../config/gameplay.js';
 import { surfaceById } from '../config/tuning.js';
 import { clamp01, lerp, smoothstep } from '../core/mathx.js';
@@ -55,6 +56,8 @@ export class World {
     this.scatter = null;
     /** Animals, pooled around the camera. See wildlife.js. */
     this.wildlife = null;
+    /** Grass, pooled around the camera the same way. See groundCover.js. */
+    this.groundCover = null;
     /** Trunk damage and the disguise. See trees.js. */
     this.trees = new Trees();
     /** @type {{name:string,position:THREE.Vector3,radius:number,discovered:boolean}[]} */
@@ -132,6 +135,19 @@ export class World {
 
     if (scatter) {
       await step('forest', 0.72, () => this._scatterForest());
+      await step('ground-cover', 0.86, () => {
+        this.groundCover = new GroundCover({
+          terrain: this.terrain,
+          materials: this.materials,
+          theme: this.theme,
+          seed: this.seed ^ 0x6c0f,
+          // Grass stops at the verge for the same reason the trees do, and by
+          // the same rule — but tighter, because a track with a bare metre of
+          // dirt either side of it reads as maintained, which this one is not.
+          avoid: this._trackAvoidance(OPEN_WORLD.groundCover.trackClearance),
+        }).build();
+        this.root.add(this.groundCover.root);
+      });
       await step('wildlife', 0.9, () => {
         this.wildlife = new Wildlife({
           terrain: this.terrain,
@@ -151,6 +167,27 @@ export class World {
     return this;
   }
 
+  /**
+   * A predicate that rejects anything too close to a racing surface.
+   *
+   * Shared by the forest and the ground cover so there is exactly one answer to
+   * "is this the road?" — if they used different rules you would get grass
+   * growing where trees are forbidden, which reads as a mown verge.
+   *
+   * @param {number} margin metres of clearance beyond the shoulder
+   * @returns {(x:number, z:number)=>boolean} true = do not place here
+   */
+  _trackAvoidance(margin) {
+    const clearance = ROAD.shoulderWidth + margin;
+    return (x, z) => {
+      for (const t of this._trackList) {
+        const q = t.query(x, z, this._query);
+        if (q && q.dist < q.halfWidth + clearance) return true;
+      }
+      return false;
+    };
+  }
+
   _scatterForest() {
     const s = new Scatter({
       terrain: this.terrain,
@@ -162,14 +199,7 @@ export class World {
 
     // Keep props off the racing surface and its run-off, but let them creep
     // right up to the edge — the forest should feel like it is pressing in.
-    const clearance = ROAD.shoulderWidth + 3.5;
-    const avoidTracks = (x, z) => {
-      for (const t of this._trackList) {
-        const q = t.query(x, z, this._query);
-        if (q && q.dist < q.halfWidth + clearance) return true;
-      }
-      return false;
-    };
+    const avoidTracks = this._trackAvoidance(3.5);
 
     const D = OPEN_WORLD.scatterDensity;
     const span = this.terrain.halfSpan;
@@ -178,7 +208,8 @@ export class World {
     s.place({ kind: 'dead', count: Math.round(D.trees * 0.1), region: { inner: span * 0.3, radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'rock', count: D.rocks, region: { radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'bush', count: D.bushes, region: { radius: span * 0.95 }, avoid: avoidTracks });
-    s.place({ kind: 'grass', count: D.grass, region: { radius: span * 0.9 }, avoid: avoidTracks });
+    // Grass is NOT scattered. It is a pool that follows the camera — see
+    // `groundCover.js` and `OPEN_WORLD.groundCover`.
     s.place({ kind: 'log', count: Math.round(D.rocks * 0.35), region: { radius: span * 0.9 }, avoid: avoidTracks });
     // Blank signs only exist away from the tracks. Nobody was meant to read them.
     s.place({ kind: 'sign', count: 90, region: { inner: span * 0.25, radius: span * 0.9 }, avoid: avoidTracks });
@@ -396,6 +427,8 @@ export class World {
 
   update(dt, time, cameraPosition = null) {
     this.wildlife?.update(dt, cameraPosition);
+    // Grass follows the camera and blows in the wind. Both live in here.
+    this.groundCover?.update(dt, cameraPosition);
     // Watches for the player shrugging off a worn tree. Costs nothing while
     // nobody is wearing one, which is almost always.
     this.trees.update(dt);
@@ -416,6 +449,7 @@ export class World {
     this.lighting.clear();
     this.terrain?.dispose();
     this.wildlife?.dispose();
+    this.groundCover?.dispose();
     this.trees.dispose();
     this.scatter?.dispose();
     this.collision.clear();

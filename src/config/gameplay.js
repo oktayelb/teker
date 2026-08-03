@@ -305,18 +305,79 @@ export const OPEN_WORLD = {
   terrainResolution: 220,
   /** Metres between terrain samples. resolution * cellSize = world span. */
   terrainCellSize: 13,
-  /** Trees, rocks and grass tufts across the whole world. */
+  /** Trees, rocks and undergrowth across the whole world. */
   scatterDensity: {
     trees: 4200,
     rocks: 900,
     bushes: 2400,
-    grass: 5200,
     /** Somebody was out here. Sparse on purpose — finding one should register. */
     posters: 140,
     wrecks: 70,
   },
   /** Draw distance for scattered props, metres. Fog hides the pop-in. */
   scatterDrawDistance: 340,
+
+  /**
+   * GROUND COVER — grass that is actually there.
+   *
+   * Grass used to be scattered like trees: 5200 tufts over a 2860m span, one
+   * per 1500m², which is a tuft every forty metres and therefore no grass at
+   * all. Scattering ten times more would cost ten times the memory to fill a
+   * world you can never see one percent of at once.
+   *
+   * So it is a POOL, the way `WILDLIFE` is. A fixed population lives in bands
+   * that follow the camera; anything that falls out of its band is reflected
+   * through the camera to the far edge of the same band, where it grows in out
+   * of the fog. Nothing is allocated after `build()`, and the numbers below are
+   * how much grass is AROUND YOU rather than how much exists.
+   *
+   * Two bands, because one is either too sparse underfoot or too expensive at
+   * distance. The near band is thick and finely bladed; the far band is coarse,
+   * larger and cheaper per tuft — level of detail expressed as data.
+   */
+  groundCover: {
+    bands: [
+      /** Underfoot: about one tuft per 1.4m², which reads as continuous turf. */
+      { count: 1300, radius: 25, blades: 4, scale: [0.7, 1.25], variants: 4 },
+      /** Out to the fog: sparser, but each tuft is bigger so it still reads. */
+      { count: 1500, radius: 78, blades: 3, scale: [1.15, 2.1], variants: 3 },
+    ],
+    /**
+     * Fraction of a band's radius over which a tuft scales in from nothing.
+     * This is the whole anti-pop-in mechanism: recycled tufts always arrive at
+     * the band edge, and they arrive at zero size. 0 would make them appear.
+     */
+    fadeBand: 0.22,
+    /** Do not bother rewriting an instance matrix for a smaller change. */
+    fadeEpsilon: 0.02,
+    /** Nothing grows on a slope steeper than this (Terrain's 0..1 metric). */
+    maxSlope: 0.4,
+    /** Terrain surfaces grass will root in. CLIFF is bare rock by definition. */
+    surfaces: ['GRASS', 'DIRT'],
+    /** Extra clearance beyond the road shoulder, metres. Verges stay bare. */
+    trackClearance: 2.0,
+    /** Metres the tuft origin is sunk, so blades start below the facet seam. */
+    sink: 0.06,
+    /**
+     * WIND — injected into the vertex shader, never computed per instance.
+     *
+     * Grass that does not move reads as plastic, and moving 2800 instances on
+     * the CPU would cost more than everything else in this file put together.
+     * See `src/render/wind.js`: the bend is proportional to height above the
+     * tuft's own base, so the roots stay welded to the ground.
+     */
+    wind: {
+      /** Sway coefficient. Tip displacement ≈ strength × height², so a 0.8m
+       *  blade leans about 14cm at full gust. */
+      strength: 0.22,
+      /** Radians per second of the main sway. */
+      speed: 1.5,
+      /** Metres per radian of phase across the ground — the gust wavelength. */
+      scale: 0.055,
+      /** Direction the wind blows, normalised on use. */
+      direction: { x: 0.82, z: 0.57 },
+    },
+  },
   /** Seed for world generation — same seed, same world, every time. */
   seed: 0x7e4e17,
   /**

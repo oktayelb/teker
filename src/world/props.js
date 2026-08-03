@@ -178,25 +178,73 @@ export function createBush(theme, rng, scaleHint = 1) {
   return { geometry: b.build(), collider: null, tag: 'bush', height: size };
 }
 
-/** Grass tuft: two crossed blades. Cheap ground texture at low draw cost. */
-export function createGrassTuft(theme, rng, scaleHint = 1) {
+/**
+ * Grass tuft: a rosette of tapered, arching blades.
+ *
+ * This used to be two crossed quads standing straight up, which from a chase
+ * camera is a green X on the floor — a decal, not a plant. What sells grass at
+ * this poly count is the SILHOUETTE: several blades leaving one point at
+ * different angles, each narrowing and bending over. Three triangles buys all
+ * of that per blade (a quad for the stem, one triangle for the tip), and the
+ * two pieces take different shades so the tuft has a dark root and a lit tip
+ * without a single extra vertex.
+ *
+ * Everything starts at y = 0 because the wind shader bends by y² — see
+ * `render/wind.js`. A blade whose base is above the origin would visibly slide.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.blades] blades in the rosette; 3 is the far-band LOD
+ */
+export function createGrassTuft(theme, rng, scaleHint = 1, opts = null) {
   const b = new GeomBuilder();
   const c = theme.foliage.grassBlade;
-  const h = rng.range(0.4, 0.9) * scaleHint;
-  const w = h * 0.55;
-  for (let i = 0; i < 2; i++) {
-    const a = i * Math.PI * 0.5 + rng.range(0, 0.6);
-    const dx = Math.cos(a) * w;
-    const dz = Math.sin(a) * w;
+  const blades = Math.max(1, Math.round(opts?.blades ?? 4));
+  const h = rng.range(0.42, 0.85) * scaleHint;
+  // Blades share the rosette evenly, then jitter — evenly spaced alone reads as
+  // a fan, purely random leaves gaps you see as a bald patch.
+  const step = (Math.PI * 2) / blades;
+  const spin = rng.range(0, Math.PI * 2);
+  let tallest = 0;
+
+  for (let i = 0; i < blades; i++) {
+    const a = spin + i * step + rng.range(-0.35, 0.35);
+    const len = h * rng.range(0.7, 1.25);
+    tallest = Math.max(tallest, len);
+    const halfW = len * rng.range(0.045, 0.075);
+    // Which way this blade arches, and how far it has fallen from vertical.
+    const bend = len * rng.range(0.18, 0.5);
+    const bx = Math.cos(a) * bend;
+    const bz = Math.sin(a) * bend;
+    // The blade's own plane, so the strip is not edge-on to its own arc.
+    const px = -Math.sin(a) * halfW;
+    const pz = Math.cos(a) * halfW;
+
+    const midY = len * 0.55;
+    const tone = rng.range(-0.06, 0.06);
+    const root = shade(c, tone - 0.07);
+    const tip = shade(c, tone + 0.09);
+
+    // Stem: full width at the ground, three-fifths of it at mid height, already
+    // leaning a third of the way into the arch.
+    const mx = bx * 0.3;
+    const mz = bz * 0.3;
     b.addQuad(
-      new THREE.Vector3(-dx, 0, -dz),
-      new THREE.Vector3(dx, 0, dz),
-      new THREE.Vector3(dx, h, dz),
-      new THREE.Vector3(-dx, h, -dz),
-      shade(c, rng.range(-0.05, 0.08))
+      new THREE.Vector3(-px, 0, -pz),
+      new THREE.Vector3(px, 0, pz),
+      new THREE.Vector3(mx + px * 0.6, midY, mz + pz * 0.6),
+      new THREE.Vector3(mx - px * 0.6, midY, mz - pz * 0.6),
+      root
+    );
+    // Tip: from mid width to a point, out at the end of the arch.
+    b.addTriangle(
+      new THREE.Vector3(mx - px * 0.6, midY, mz - pz * 0.6),
+      new THREE.Vector3(mx + px * 0.6, midY, mz + pz * 0.6),
+      new THREE.Vector3(bx, len, bz),
+      tip
     );
   }
-  return { geometry: b.build(), collider: null, tag: 'grass', height: h };
+
+  return { geometry: b.build(), collider: null, tag: 'grass', height: tallest };
 }
 
 /** A felled log — reads as "someone worked here", which the empty world needs. */
@@ -509,13 +557,15 @@ export const PROP_FACTORIES = {
 /**
  * Pre-build `count` variants of a prop type so instancing has something to
  * choose between.
+ * @param {object} [opts] passed through to the factory — how a caller asks for
+ *   a cheaper or denser build of the same prop without props.js reading config
  * @returns {Prop[]}
  */
-export function buildVariants(kind, theme, seed, count = 4, scaleHint = 1) {
+export function buildVariants(kind, theme, seed, count = 4, scaleHint = 1, opts = null) {
   const factory = PROP_FACTORIES[kind];
   if (!factory) throw new Error(`Unknown prop kind "${kind}"`);
   const rng = new Rng(seed);
   const out = [];
-  for (let i = 0; i < count; i++) out.push(factory(theme, rng, scaleHint));
+  for (let i = 0; i < count; i++) out.push(factory(theme, rng, scaleHint, opts));
   return out;
 }

@@ -41,8 +41,9 @@ export const SCATTER_RULES = {
   dead: { variants: 3, scale: [0.8, 1.2], maxSlope: 0.5, surfaces: ['GRASS', 'DIRT', 'MUD'], clumping: 0.25, clumpScale: 0.005, tintJitter: 0.06, lean: 0.12 },
   rock: { variants: 6, scale: [0.7, 1.6], maxSlope: 0.8, surfaces: ['GRASS', 'DIRT', 'MUD'], clumping: 0.45, clumpScale: 0.004, tintJitter: 0.08, lean: 0.14 },
   bush: { variants: 5, scale: [0.7, 1.5], maxSlope: 0.5, surfaces: ['GRASS', 'DIRT'], clumping: 0.5, clumpScale: 0.0045, tintJitter: 0.14, lean: 0.08 },
-  grass: { variants: 4, scale: [0.7, 1.6], maxSlope: 0.45, surfaces: ['GRASS'], clumping: 0.35, clumpScale: 0.006, tintJitter: 0.18, lean: 0.1 },
-  log: { variants: 3, scale: [0.8, 1.2], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.2, clumpScale: 0.006, tintJitter: 0.08, lean: 0.06 },
+  // There is no `grass` rule on purpose. Ground cover is a camera-following
+  // pool, not scatter — see `world/groundCover.js`.
+  log:{ variants: 3, scale: [0.8, 1.2], maxSlope: 0.3, surfaces: ['GRASS', 'DIRT'], clumping: 0.2, clumpScale: 0.006, tintJitter: 0.08, lean: 0.06 },
   sign: { variants: 2, scale: [0.9, 1.1], maxSlope: 0.25, surfaces: ['GRASS', 'DIRT'], clumping: 0.0, clumpScale: 0.01, tintJitter: 0.03, lean: 0.02 },
   // Somebody walked out here to put these up, so they cluster near where a
   // person could get to rather than scattering evenly through the trees.

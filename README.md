@@ -252,6 +252,37 @@ the question the sirens ask.
 
 `CHASE.mercyAfter` guarantees you win eventually. It is a scene, not a skill check.
 
+### The grass is a pool, not scenery
+
+Ground cover used to be scattered like everything else: 5200 tufts over a
+2860 m span, which is one tuft per 1500 m² and therefore no grass at all.
+Ten times as many would have cost ten times the memory to fill a world you can
+never see one percent of at once.
+
+So `src/world/groundCover.js` borrows the trick from `wildlife.js`. A fixed
+population lives in two **bands that follow the camera** — a thick one 25 m
+across your feet and a coarse one out to 78 m — and a tuft that falls out of its
+band is reflected through the camera to the far edge of the same band, where it
+grows in out of the fog. 2800 tufts make the whole world look grassy, nothing is
+allocated after `build()`, and the numbers in `OPEN_WORLD.groundCover` are how
+much grass is *around you* rather than how much exists.
+
+Two details do most of the work:
+
+- **A recycled tuft always arrives at zero size** and scales in over the outer
+  `fadeBand` of its radius. That is the entire anti-pop-in mechanism; there is
+  no distance check anywhere else.
+- **The blades bend in the shader**, not on the CPU (`src/render/wind.js`,
+  injected at `#include <begin_vertex>` the way `psx.js` injects at
+  `#include <fog_vertex>`). Displacement scales with the square of the height
+  above the tuft's own origin, so the roots stay welded to the terrain. An
+  instance matrix is only ever rewritten when the tuft is recycled or when its
+  fade moves — the grass waves without anything touching it.
+
+A camera that *teleports* (a respawn, a mode change) breaks the reflection
+assumption completely, so a jump wider than the widest band re-lays the whole
+population instead. Without that you stand in a perfectly circular bald patch.
+
 ### The forest is scenery until you have earned it
 
 Hit a tree hard enough and it comes down on the car and stays there: a car wearing
@@ -292,11 +323,11 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 167 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 207 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
-collision, the settings round trip, and the physics: 0–100, top speed, braking,
-understeer on ice, and a simulated human driving the third parkour's corner and
-coming off it.
+collision, ground-cover placement, the vertex-wind injection, the settings round
+trip, and the physics: 0–100, top speed, braking, understeer on ice, and a
+simulated human driving the third parkour's corner and coming off it.
 
 ### Bugs it caught, and one it could not
 

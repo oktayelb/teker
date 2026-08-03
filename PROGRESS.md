@@ -88,6 +88,13 @@ how to tune it and where to build the next act.
   (`src/render/lightPool.js`) so the count never changes and three never
   recompiles materials mid-scene.
 
+- **P17** — Ground cover. Grass is no longer scattered; it is a camera-following
+  pool in two bands (`src/world/groundCover.js`, `OPEN_WORLD.groundCover`),
+  rooted with `terrain.heightAt` and stood up on `terrain.normalAt`. It bends
+  in the vertex shader (`src/render/wind.js`), injected at `begin_vertex` so it
+  cannot fight the PSX snap at `fog_vertex`. 2800 tufts, 29k triangles, zero
+  allocation after `build()`.
+
 ## Bugs found so far (do not reintroduce)
 
 1. **Stability assist bypassed the grip ceiling.** It was applied after the yaw
@@ -149,6 +156,18 @@ how to tune it and where to build the next act.
     a setting that *looks* applied is worse than one that visibly failed.
     Master and mute hid it by working, because `_applyMasterGain()` does not
     gate on `_live`. Anything deferred past unlock has to be replayed there.
+17. **`Matrix4#decompose` lies about a zero matrix.** three returns scale
+    `(1,1,1)` and an identity rotation for anything whose determinant is zero,
+    which is exactly what a hidden InstancedMesh slot is. A test that finds the
+    live instances by decomposing therefore sees every *hidden* one as full
+    size at the origin — and passes, while asserting nothing. Measure the basis
+    column instead: `Math.hypot(e[0], e[1], e[2])`.
+18. **A pooled instance that stops moving keeps its last matrix.** Ground cover
+    only rewrites an instance when its fade changes by more than an epsilon, so
+    a tuft that left its band while still an epsilon tall never got the final
+    write and stayed drawn, sub-pixel, at a position hundreds of metres behind
+    the player. Invisible, and still wrong. Snap the fade's two plateaus to
+    exactly 0 and 1 so "hidden" is a state you can compare against.
 
 ## Tooling note
 
