@@ -168,8 +168,16 @@ export class GeomBuilder {
     return this;
   }
 
-  /** N-sided cone — tree canopies, spikes. */
-  addCone(center, radius, height, sides, color, tilt = 0) {
+  /**
+   * N-sided cone — tree canopies, spikes.
+   *
+   * `capBottom` is worth knowing about. A cone's base fan is `sides - 2`
+   * triangles, and on a stacked canopy every tier but the lowest has that fan
+   * buried inside the tier below it. Four invisible triangles per tier,
+   * multiplied by four thousand trees, is a triangle budget's worth of nothing.
+   * Pass false wherever the underside cannot be seen.
+   */
+  addCone(center, radius, height, sides, color, tilt = 0, capBottom = true) {
     const apex = new THREE.Vector3(center.x, center.y + height, center.z);
     const ring = [];
     for (let i = 0; i < sides; i++) {
@@ -183,7 +191,7 @@ export class GeomBuilder {
       const p0 = ring[i];
       const p1 = ring[(i + 1) % sides];
       this.addTriangle(p0, p1, apex, side);
-      if (i > 1) this.addTriangle(ring[0], p1, p0, bottom);
+      if (capBottom && i > 1) this.addTriangle(ring[0], p1, p0, bottom);
     }
     return this;
   }

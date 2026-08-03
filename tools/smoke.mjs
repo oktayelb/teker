@@ -1835,6 +1835,101 @@ section('13. there is something growing under the trees');
     `${dayFern.toString(16)} vs ${nightFern.toString(16)}`);
 }
 
+// ---------------------------------------------------------------------------
+section('14. the trees got a nudge, and still work');
+
+// Tree geometry is not only scenery: `collider.canopyY` is where `Trees`
+// cuts a felled tree into the thing the player wears, and the collider is the
+// identity of a fellable trunk. Adding roots, tiers and a spire is exactly the
+// kind of change that quietly breaks felling, so everything the disguise
+// depends on is asserted against the geometry itself.
+{
+  const { buildVariants } = await import('../src/world/props.js');
+  const { SCATTER_RULES } = await import('../src/world/scatter.js');
+  const { Trees } = await import('../src/world/trees.js');
+  const { TREES } = await import('../src/config/gameplay.js');
+
+  // A pine is multiplied by ~2600 and a broadleaf by ~1200. The budget is the
+  // art direction, not a limitation, and this is the guard on it.
+  const BUDGET = { pine: 60, broadleaf: 56, dead: 68 };
+
+  for (const kind of ['pine', 'broadleaf', 'dead']) {
+    const variants = buildVariants(kind, theme, 4242, SCATTER_RULES[kind].variants);
+    let worstTris = 0;
+    let noTrunk = 0;
+    let noCanopy = 0;
+    let outsideHitbox = 0;
+    let coversBuilt = 0;
+
+    for (const v of variants) {
+      const pos = v.geometry.getAttribute('position');
+      worstTris = Math.max(worstTris, pos.count / 3);
+      const cut = v.canopyY;
+
+      // Split the tree the way `Trees#_canopyGeometry` splits it, and check
+      // both halves exist. A tree with nothing under the cut has no trunk; one
+      // with nothing over it can never be worn.
+      //
+      // The BASE region is stricter than "below the cut": a broadleaf's lowest
+      // foliage legitimately dips under its own `canopyY`, and foliage is
+      // *supposed* to overhang the hitbox — you drive under branches. What may
+      // never overhang is the bit at the bottom you would actually hit, which
+      // is where the new roots are.
+      let below = 0;
+      let above = 0;
+      let baseRadius = 0;
+      for (let t = 0; t < pos.count; t += 3) {
+        const cy = (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3;
+        if (cy < cut) below++;
+        else above++;
+        if (cy >= cut * 0.5) continue;
+        for (let k = 0; k < 3; k++) {
+          baseRadius = Math.max(baseRadius, Math.hypot(pos.getX(t + k), pos.getZ(t + k)));
+        }
+      }
+      if (below === 0) noTrunk++;
+      if (above === 0) noCanopy++;
+      if (baseRadius > v.collider.radius + 1e-6) outsideHitbox++;
+
+      // And the cover itself, built by the real code path.
+      const src = { geometry: v.geometry, material: null, userData: {} };
+      const cover = new Trees()._canopyGeometry(src, { canopyY: v.canopyY, instance: 0 });
+      if (cover && cover.radius > 0 && cover.height > 0) coversBuilt++;
+    }
+
+    ok(`a ${kind} is still cheap`, worstTris <= BUDGET[kind], `${worstTris} triangles, budget ${BUDGET[kind]}`);
+    ok(`every ${kind} variant has a trunk`, noTrunk === 0);
+    ok(`every ${kind} variant has a canopy above the cut`, noCanopy === 0);
+    ok(`the base of a ${kind} fits inside its own hitbox`, outsideHitbox === 0, `${outsideHitbox} variants`);
+
+    // `dead` is deliberately absent. A felled dead tree has never produced a
+    // wearable cover — its trunk is one cylinder spanning the whole height, so
+    // `_canopyGeometry`'s first pass takes `base` from the ground and the
+    // `wornCanopy` ceiling lands below the cut, leaving an empty band. That is
+    // a pre-existing bug in the interaction between the prop and `TREES`
+    // (PROGRESS bug 20), verified present before these tree changes, and its
+    // fix belongs in `trees.js`.
+    if (kind !== 'dead') {
+      ok(
+        `every ${kind} can still be worn`,
+        coversBuilt === variants.length,
+        `${coversBuilt}/${variants.length} covers built`
+      );
+    }
+  }
+
+  // The world's own trees, as `Scatter` produced them: every fellable collider
+  // has to carry a usable `canopyY`, because that is what identifies it.
+  const fellable = world.scatter.colliders.filter((c) => TREES.fellable.includes(c.kind));
+  const broken = fellable.filter(
+    (c) => !(c.canopyY > 0) || !(c.radius > 0) || !(c.height > 0) || !c.baseMatrix || !(c.scale > 0)
+  );
+  ok('every fellable tree in the world knows where its canopy starts', broken.length === 0,
+    `${fellable.length} trees, ${broken.length} broken`);
+  ok('…and they are all inside the collision grid', world.collision.count > fellable.length,
+    `${world.collision.count} colliders, ${fellable.length} of them trees`);
+}
+
 function pointLineDistance(p, a, b) {
   const dx = b.x - a.x;
   const dz = b.z - a.z;

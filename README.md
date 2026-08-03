@@ -272,6 +272,38 @@ that number and it never fires, which is exactly why the ground used to read as
 tinted noise. The thresholds in `GROUND_PAINT` are absolute, and the measured
 percentiles are written down next to them.
 
+### A nudge to the trees, and the thing that nearly broke
+
+`createPine` went from 50 to 57 triangles, `createBroadleaf` from 40 to 48, the
+dead tree from 64 to 67. Trunks taper properly, pines get a fifth tier and a
+four-triangle spire, canopy tiers grade from shaded at the skirt to lit at the
+top, broadleaves carry two greens instead of one, and everything with a trunk
+gets three **root buttresses** — one triangle each, visible because trees use
+the double-sided `foliage` material. Roots are what stop a cylinder meeting
+flat ground at a clean circle and reading as a post pushed into the soil.
+
+Two things paid for it. `GeomBuilder.addCone` now takes `capBottom`, and every
+stacked canopy tier but the lowest passes false: a cone's base fan is four
+triangles buried inside the tier below it, times four thousand trees. And the
+broadleaf's third canopy mass is a capless five-sided cone rather than a
+twelfth frustum box.
+
+> **⚠ Tree geometry is gameplay.** `collider.canopyY` is where `Trees` cuts a
+> felled tree into the thing the player wears, and the collider *is* the
+> identity of a fellable trunk. Two invariants hold it together, both now
+> asserted: every variant must have triangles on both sides of `canopyY`, and
+> nothing drawn near the ground may reach outside `collider.radius` — a root
+> you can drive through is worse than no root. Foliage above that is *supposed*
+> to overhang; you drive under branches.
+
+**A pre-existing bug found while checking this, and left alone:** a felled dead
+tree has never produced a wearable cover. Its trunk is a single cylinder
+spanning the whole height, so `Trees#_canopyGeometry`'s first pass takes `base`
+from the ground, and the `TREES.wornCanopy` ceiling then lands *below*
+`canopyY`, leaving an empty band and returning null. The tree comes down and
+nothing goes on the car. Verified present before these changes; the fix belongs
+in `trees.js` or in `wornCanopy`, neither of which is a rendering concern.
+
 ### The understorey is placed by the canopy
 
 Ferns, low broad-leaved undergrowth and leaf litter (`createFern`,
@@ -395,10 +427,11 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 247 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 263 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
 collision, ground-cover placement, the vertex-wind injection, the terrain's own
-vertex colours, the worn trails, the understorey, the settings round trip, and
+vertex colours, the worn trails, the understorey, tree-collider integrity, the
+settings round trip, and
 the physics:
 0–100, top speed, braking, understeer on ice, and a simulated human driving the
 third parkour's corner and coming off it.

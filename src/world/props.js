@@ -18,6 +18,40 @@ import { Rng } from '../core/rng.js';
 
 const V0 = { x: 0, y: 0, z: 0 };
 
+/**
+ * Root buttresses: single triangles standing on edge around the base of a trunk.
+ *
+ * One triangle each, and they work because everything with a trunk is drawn
+ * with the double-sided `foliage` material, so a fin is visible from both
+ * sides. What they buy is the join: a cylinder that meets flat ground at a
+ * clean circle reads as a post somebody pushed into the soil, and three
+ * triangles are the difference between that and something that grew there.
+ *
+ * They stay INSIDE the trunk collider's radius on purpose — the roots are then
+ * a visual explanation of why the car stops where it stops.
+ *
+ * @param {GeomBuilder} b
+ * @param {number} trunkR trunk radius at the ground
+ * @param {number} reach how far out the roots spread, as a multiple of trunkR
+ * @param {number} rise how far up the trunk they climb, as a multiple of trunkR
+ */
+function addRoots(b, rng, trunkR, colour, count, reach = 3, rise = 2.2) {
+  const spin = rng.range(0, Math.PI * 2);
+  for (let i = 0; i < count; i++) {
+    const a = spin + (i / count) * Math.PI * 2 + rng.range(-0.4, 0.4);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const out = trunkR * reach * rng.range(0.7, 1);
+    const up = trunkR * rise * rng.range(0.75, 1);
+    b.addTriangle(
+      new THREE.Vector3(cos * trunkR * 0.8, 0, sin * trunkR * 0.8),
+      new THREE.Vector3(cos * out, 0, sin * out),
+      new THREE.Vector3(cos * trunkR * 0.8, up, sin * trunkR * 0.8),
+      shade(colour, rng.range(-0.05, 0.01))
+    );
+  }
+}
+
 /** Conifer: the backbone of the forest. */
 export function createPine(theme, rng, scaleHint = 1) {
   const b = new GeomBuilder();
@@ -26,12 +60,15 @@ export function createPine(theme, rng, scaleHint = 1) {
   const trunkH = height * rng.range(0.2, 0.3);
   const trunkR = height * 0.035;
 
-  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.25, trunkR, trunkH, 5, {
+  // A real trunk is nearly twice as wide at the soil as it is at the first
+  // branch. The taper costs nothing — the cylinder was always there.
+  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.7, trunkR * 0.85, trunkH, 5, {
     side: F.trunk,
     top: shade(F.trunk, 0.08),
   });
+  addRoots(b, rng, trunkR, shade(F.trunk, -0.07), 3, 3, 2.4);
 
-  const tiers = rng.int(3, 4);
+  const tiers = rng.int(4, 5);
   const canopyH = height - trunkH;
   const shades = [F.canopyA, F.canopyB, F.canopyC];
   for (let i = 0; i < tiers; i++) {
@@ -39,11 +76,26 @@ export function createPine(theme, rng, scaleHint = 1) {
     const y = trunkH + canopyH * t * 0.72;
     const r = height * 0.26 * (1 - t * 0.62);
     const h = canopyH * (0.46 - t * 0.06);
+    // Light arrives from above, so the skirt sits in the tree's own shadow and
+    // the tiers lighten as they climb. Cycling three flat shades gives variety;
+    // grading them gives depth, and it is the same number of triangles.
+    const tone = shade(shades[i % shades.length], -0.07 + t * 0.17);
     b.addCone({ x: 0, y, z: 0 }, r, h, 6, {
-      side: shades[i % shades.length],
-      bottom: shade(shades[i % shades.length], -0.06),
-    }, rng.range(0, 1));
+      side: tone,
+      bottom: shade(tone, -0.08),
+    }, rng.range(0, 1), i === 0);
+    // Only the lowest tier's underside is ever visible — the rest are buried in
+    // the tier below. See `GeomBuilder#addCone`.
   }
+
+  // The spire. A pine's silhouette is a point, and a stack of cones alone ends
+  // in a blunt one; four triangles sharpen the whole tree from any distance.
+  const tLast = (tiers - 1) / tiers;
+  const topY = trunkH + canopyH * tLast * 0.72;
+  const topH = canopyH * (0.46 - tLast * 0.06);
+  b.addCone({ x: 0, y: topY + topH * 0.45, z: 0 }, height * 0.05, topH * 0.85, 4, {
+    all: shade(shades[tiers % shades.length], 0.11),
+  }, rng.range(0, 1), false);
 
   return {
     geometry: b.build(),
@@ -64,15 +116,20 @@ export function createBroadleaf(theme, rng, scaleHint = 1) {
   const trunkH = height * rng.range(0.34, 0.44);
   const trunkR = height * 0.045;
 
-  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.3, trunkR * 0.85, trunkH, 5, {
+  b.addCylinder({ x: 0, y: trunkH / 2, z: 0 }, trunkR * 1.55, trunkR * 0.8, trunkH, 5, {
     side: F.trunk,
     top: shade(F.trunk, 0.06),
   });
+  addRoots(b, rng, trunkR, shade(F.trunk, -0.06), 3, 2.6, 2);
 
   // Canopy: two overlapping squashed cones, offset — asymmetry reads as organic.
   const canopyR = height * 0.3;
   const canopyY = trunkH * 0.92;
   const shadesA = rng.pick([F.canopyA, F.canopyB]);
+  // The second mass takes its colour from a DIFFERENT entry rather than a
+  // shade of the first, so a broadleaf has two greens in it the way a real one
+  // does. Shading alone only ever produces a lighter version of one leaf.
+  const shadesB = shadesA === F.canopyA ? F.canopyB : F.canopyC;
   b.addFrustumBox(
     { x: 0, y: canopyY + canopyR * 0.55, z: 0 },
     { x: canopyR * 2, y: canopyR * 1.4, z: canopyR * 2 },
@@ -84,8 +141,24 @@ export function createBroadleaf(theme, rng, scaleHint = 1) {
     { x: canopyR * rng.range(-0.3, 0.3), y: canopyY + canopyR * 1.25, z: canopyR * rng.range(-0.3, 0.3) },
     { x: canopyR * 1.3, y: canopyR * 0.9, z: canopyR * 1.3 },
     { x: 0.4, z: 0.4 },
-    { all: shade(shadesA, 0.05), top: shade(shadesA, 0.12) },
+    { all: shadesB, top: shade(shadesB, 0.1) },
     rng.range(0, Math.PI)
+  );
+  // A third, smaller mass pushed out to one side. Five triangles as a capless
+  // cone rather than twelve as another box: it is a crown, and nobody sees the
+  // underside of a crown that is sitting on the canopy below it.
+  b.addCone(
+    {
+      x: canopyR * rng.range(-0.55, 0.55),
+      y: canopyY + canopyR * rng.range(1.1, 1.5),
+      z: canopyR * rng.range(-0.55, 0.55),
+    },
+    canopyR * rng.range(0.55, 0.8),
+    canopyR * rng.range(0.8, 1.25),
+    5,
+    { all: shade(shadesB, 0.06) },
+    rng.range(0, Math.PI),
+    false
   );
 
   return {
@@ -104,7 +177,16 @@ export function createDeadTree(theme, rng, scaleHint = 1) {
   const height = rng.range(5, 9) * scaleHint;
   const trunkR = height * 0.04;
   const col = shade(F.trunk, -0.05);
-  b.addCylinder({ x: 0, y: height / 2, z: 0 }, trunkR * 1.5, trunkR * 0.5, height, 5, { all: col });
+  // Bare wood is paler where it has weathered and dark down at the soil line.
+  b.addCylinder({ x: 0, y: height / 2, z: 0 }, trunkR * 1.9, trunkR * 0.45, height, 5, {
+    side: col,
+    top: shade(col, 0.14),
+    bottom: shade(col, -0.1),
+  });
+  // A dead tree has lost its bark and its roots are the most visible part of
+  // it. `reach` stays inside this variant's collider radius (`trunkR * 3`) —
+  // visible geometry outside the hitbox is a root you drive through.
+  addRoots(b, rng, trunkR, shade(col, -0.08), 3, 2.8, 2.6);
 
   const branches = rng.int(2, 4);
   for (let i = 0; i < branches; i++) {

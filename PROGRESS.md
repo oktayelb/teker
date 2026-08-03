@@ -112,6 +112,14 @@ how to tune it and where to build the next act.
   so they only grow within `OPEN_WORLD.understoreyRadius` of a trunk that is
   already standing. No colliders. +45k triangles, build 246ms → 275ms.
 
+- **P21** — Trees, a nudge. Trunk taper, three root buttresses on every trunk
+  (one triangle each, visible because trees are double-sided), a fifth pine
+  tier plus a spire, tiers graded from shaded skirt to lit top, a second green
+  and a capless cone crown on the broadleaf. Paid for with
+  `GeomBuilder.addCone(..., capBottom)` — every stacked tier but the lowest has
+  its base fan buried in the tier below. Pine 50→57 tris, broadleaf 40→48,
+  dead 64→67. World 514k→534k, build 275ms→295ms.
+
 ## Bugs found so far (do not reintroduce)
 
 1. **Stability assist bypassed the grip ceiling.** It was applied after the yaw
@@ -192,6 +200,18 @@ how to tune it and where to build the next act.
     expressed as a fraction of it — which is the natural thing to write — is
     dead code that looks alive, and it is why the ground read as tinted noise
     for so long. Measure the distribution before picking a slope threshold.
+20. **A felled dead tree cannot be worn. STILL OPEN.** `TREES.fellable`
+    includes `dead`, but `Trees#_canopyGeometry` returns null for every dead
+    variant, so the trunk comes down and nothing goes on the car — no error,
+    no log. The cause is an interaction, not a typo: a dead tree's trunk is one
+    cylinder spanning the whole height, so a triangle whose *centroid* is above
+    `canopyY` still has *vertices* on the ground. Pass 1 therefore takes
+    `base = 0`, the `wornCanopy` ceiling comes out at `0.3 × height` — below
+    the `0.45 × height` cut — and pass 2 keeps an empty band.
+    Found while adding roots in P21 and confirmed present beforehand; the fix
+    belongs in `trees.js` (take `base` from the cut, not from the geometry) or
+    in `TREES.wornCanopy`, and was left alone because neither is a look change.
+    Pine and broadleaf are unaffected and asserted.
 
 ## Tooling note
 
