@@ -829,6 +829,144 @@ const sampleB = worldB.terrain.heightAt(123, -456);
 ok('same seed, same terrain', Math.abs(sampleA - sampleB) < 1e-6, `${sampleA.toFixed(4)} vs ${sampleB.toFixed(4)}`);
 
 // ---------------------------------------------------------------------------
+section('8. saved sound settings actually reach the mix');
+
+// The player restores their volumes at boot, which is *before* the first
+// gesture, which means the AudioContext is still suspended and the GainNodes
+// will not take a value. The engine has to remember and replay. Nothing here
+// makes a sound — the fakes below only record what lands on each AudioParam,
+// because the bug was a number that never reached the node at all.
+{
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+
+  /** An AudioParam that just remembers the last value scheduled onto it. */
+  const param = (v) => ({
+    value: v,
+    setValueAtTime(x) { this.value = x; return this; },
+    setTargetAtTime(x) { this.value = x; return this; },
+    linearRampToValueAtTime(x) { this.value = x; return this; },
+    exponentialRampToValueAtTime(x) { this.value = x; return this; },
+    cancelScheduledValues() { return this; },
+    cancelAndHoldAtTime() { return this; },
+  });
+  const node = (extra = {}) => ({ connect() { return this; }, disconnect() {}, ...extra });
+
+  function fakeAudioContext() {
+    return {
+      state: 'suspended',
+      currentTime: 0,
+      // Only decides how long the noise buffers are. Keep it small: the real
+      // 44.1kHz would generate half a million samples we are never going to hear.
+      sampleRate: 8000,
+      destination: node(),
+      onstatechange: null,
+      createGain: () => node({ gain: param(1) }),
+      createDynamicsCompressor: () =>
+        node({
+          threshold: param(0), knee: param(0), ratio: param(1),
+          attack: param(0), release: param(0),
+        }),
+      createBuffer: (_ch, len) => ({ getChannelData: () => new Float32Array(len) }),
+      createBufferSource: () =>
+        node({ buffer: null, loop: false, playbackRate: param(1), start() {}, stop() {}, onended: null }),
+      resume() {
+        this.state = 'running';
+        this.onstatechange?.();
+        return Promise.resolve();
+      },
+    };
+  }
+
+  const { AudioEngine, AUDIO_CONFIG } = await import('../src/audio/audio.js');
+  const bv = AUDIO_CONFIG.MASTER.busVolumes;
+  globalThis.AudioContext = fakeAudioContext;
+
+  {
+    const engine = new AudioEngine();
+    engine.init();
+    ok('the graph builds before any gesture', engine.ready && !engine._live);
+
+    // This is Game#init: settings.load() → applyAll() → setBusVolume, all of it
+    // while the context is still asleep.
+    engine.setMasterVolume(0.35);
+    engine.setBusVolume('music', 0.2);
+    engine.setBusVolume('engine', 0.4);
+    ok('a suspended bus cannot take the value yet', engine._bus.music.gain.value === bv.music);
+    ok('…but the engine remembered the scale', engine.getBusVolume('music') === 0.2);
+
+    await engine.unlock();
+    ok('the first gesture starts the context', engine._live);
+    ok(
+      'the saved bus scale is on the real node',
+      near(engine._bus.music.gain.value, bv.music * 0.2),
+      `${engine._bus.music.gain.value.toFixed(4)} = ${bv.music} × 0.2`
+    );
+    ok('…for every bus that was set', near(engine._bus.engine.gain.value, bv.engine * 0.4));
+    ok('…and buses nobody touched keep the AUDIO_CONFIG balance', engine._bus.sfx.gain.value === bv.sfx);
+    ok('master survives the suspension too', near(engine._master.gain.value, 0.35));
+    engine.dispose();
+  }
+
+  {
+    // Tab-hide suspends the context and drops the graph's automation. Coming
+    // back must not come back at the defaults.
+    const engine = new AudioEngine();
+    engine.init();
+    await engine.unlock();
+    engine.setBusVolume('siren', 0.1);
+    engine._ctx.state = 'suspended';
+    engine._bus.siren.gain.value = bv.siren; // what a rebuilt/reset node looks like
+    engine._ctx.state = 'running';
+    engine._ctx.onstatechange();
+    ok('a resumed tab gets the mix back', near(engine._bus.siren.gain.value, bv.siren * 0.1));
+    engine.dispose();
+  }
+
+  delete globalThis.AudioContext;
+}
+
+// The other half of the round trip: the value has to survive the page as well
+// as the suspension. A second module instance is what a reload actually is.
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+
+  const { events } = await import('../src/core/events.js');
+  const { settings } = await import('../src/config/settings.js?instance=write');
+
+  let fired = 0;
+  const off = events.on('settings:changed', () => fired++);
+  settings.set('musicVolume', 0.3);
+  ok('changing a setting broadcasts it', fired === 1);
+  settings.set('musicVolume', 0.3);
+  ok('…and setting the same value again is correctly a no-op', fired === 1);
+  settings.set('musicVolume', 0.35);
+  ok('…while a real change still gets through', fired === 2, `${settings.get('musicVolume')}`);
+  off();
+
+  ok('it reached localStorage', store.size === 1);
+  const reloaded = (await import('../src/config/settings.js?instance=read')).settings;
+  ok('a fresh page starts at the default', reloaded.get('musicVolume') === 1);
+  reloaded.load();
+  ok('…and load() brings the saved value back', reloaded.get('musicVolume') === 0.35);
+
+  let applied = null;
+  const off2 = events.on('settings:changed', ({ id, value }) => {
+    if (id === 'musicVolume') applied = value;
+  });
+  reloaded.applyAll();
+  ok('…and applyAll() hands it to Game#_applySetting', applied === 0.35);
+  off2();
+
+  delete globalThis.localStorage;
+}
+
+// ---------------------------------------------------------------------------
 console.log(
   `\n${failures === 0 ? '\x1b[32m' : '\x1b[31m'}${checks - failures}/${checks} checks passed\x1b[0m\n`
 );
