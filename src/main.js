@@ -1,5 +1,5 @@
 /**
- * TEKERLEK — boot.
+ * TEKER — boot.
  *
  * This is the only file that knows the intro exists. Everything below the
  * `if (boot.skipIntro)` is the game; everything above it is the story about the
@@ -52,7 +52,7 @@ async function boot() {
   game.start();
 
   // Expose for the console. Tuning a car is much easier when you can poke it.
-  globalThis.TEKERLEK = { game, events, ui };
+  globalThis.TEKER = { game, events, ui };
 
   if (options.panel) game.toggleDebugPanel();
 
@@ -96,18 +96,18 @@ async function boot() {
 
 // Guard so tooling can import this file to inspect it without starting a game.
 if (typeof document === 'undefined') {
-  console.warn('[tekerlek] no DOM — not booting.');
+  console.warn('[teker] no DOM — not booting.');
 } else {
   boot().catch(reportBootFailure);
 }
 
 function reportBootFailure(err) {
-  console.error('[tekerlek] boot failed:', err);
+  console.error('[teker] boot failed:', err);
   const root = document.getElementById('ui-root');
   if (root) {
     root.innerHTML = `<pre style="position:fixed;inset:0;padding:2rem;margin:0;color:#d8483a;
       background:#0b0d0c;font:13px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;
-      pointer-events:auto;z-index:9999">TEKERLEK failed to start.\n\n${
+      pointer-events:auto;z-index:9999">TEKER failed to start.\n\n${
         (err && (err.stack || err.message)) || err
       }</pre>`;
   }

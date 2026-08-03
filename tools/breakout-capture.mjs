@@ -41,18 +41,18 @@ try {
     console.log('[PAGEERROR]', e.message);
   });
   await page.goto(`http://localhost:${PORT}/index.html?start=race3`, { waitUntil: 'load' });
-  await page.waitForFunction('globalThis.TEKERLEK?.game?.loop?.running === true', { timeout: 60000 });
+  await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   await page.evaluate(() => {
     // Game seconds, not wall clock: the clocks under test accumulate `dt`, and
     // a software renderer runs well under real time.
     window.__broke = null;
-    TEKERLEK.events.on('intro:phase', (p) => {
-      if (p.phase === 'breakout' && window.__broke == null) window.__broke = TEKERLEK.game.time;
+    TEKER.events.on('intro:phase', (p) => {
+      if (p.phase === 'breakout' && window.__broke == null) window.__broke = TEKER.game.time;
     });
     /** Park the player `m` metres past the ribbon edge and hold it there. */
     window.__park = (m) => {
-      const t = TEKERLEK.game.world.getTrack('track3');
-      const v = TEKERLEK.game.player;
+      const t = TEKER.game.world.getTrack('track3');
+      const v = TEKER.game.player;
       const q = t.query(v.position.x, v.position.z, {});
       const i = q ? q.index : t.startLine.sample;
       const off = t.halfWidth[i] + m;
@@ -69,8 +69,8 @@ try {
       );
     };
     window.__clocks = () => {
-      const m = TEKERLEK.game.modes.current;
-      const p = m?.progress?.find((x) => x.vehicle === TEKERLEK.game.player);
+      const m = TEKER.game.modes.current;
+      const p = m?.progress?.find((x) => x.vehicle === TEKER.game.player);
       return p
         ? {
             edge: +p.offCourseDistance.toFixed(1),
@@ -80,7 +80,7 @@ try {
         : null;
     };
   });
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 40000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 40000 });
   console.log('racing on track3.\n');
 
   // -- 1. run the verge: off course, but not out of bounds -----------------
@@ -104,18 +104,18 @@ try {
   // reset the clock. Out here there is no ribbon to be near.
   console.log('\n— leaving: off into the world —');
   await page.evaluate(() => {
-    const v = TEKERLEK.game.player;
+    const v = TEKER.game.player;
     window.__far = { x: v.position.x + 500, y: v.position.y + 4, z: v.position.z + 500 };
   });
   const t0 = await page.evaluate(() => {
-    const v = TEKERLEK.game.player;
+    const v = TEKER.game.player;
     v.position.set(window.__far.x, window.__far.y, window.__far.z);
-    return TEKERLEK.game.time;
+    return TEKER.game.time;
   });
   // Hold it out there; the hold has to be waited out, not skipped.
   for (let i = 0; i < 40 && (await page.evaluate(() => window.__broke === null)); i++) {
     await page.evaluate(() => {
-      const v = TEKERLEK.game.player;
+      const v = TEKER.game.player;
       v.position.set(window.__far.x, window.__far.y, window.__far.z);
     });
     await sleep(120);

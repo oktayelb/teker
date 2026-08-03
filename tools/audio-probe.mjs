@@ -46,10 +46,10 @@ try {
   });
 
   const ready = () =>
-    page.waitForFunction('globalThis.TEKERLEK?.game?.loop?.running === true', { timeout: 60000 });
+    page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   const tap = () =>
     page.evaluate(() => {
-      const a = TEKERLEK.game.audio;
+      const a = TEKER.game.audio;
       if (!a._ctx || !a._master) return false;
       const an = a._ctx.createAnalyser();
       an.fftSize = 2048;
@@ -84,7 +84,7 @@ try {
   await ready();
   await page.evaluate(() => (window.__gen = 'ALIVE'));
   await page.keyboard.press('Enter');
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 40000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 40000 });
   await tap();
   check('race 1 has sound', (await level()) > 0.001);
 
@@ -100,7 +100,7 @@ try {
   check('ANA MENÜ actually reloaded the page', await page.evaluate(() => window.__gen === undefined));
 
   await page.keyboard.press('Enter');
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 40000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 40000 });
   await tap();
   check('sound after ANA MENÜ', (await level()) > 0.001);
 
@@ -110,7 +110,7 @@ try {
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'load' });
   await ready();
   await page.evaluate(() => {
-    const a = TEKERLEK.game.audio;
+    const a = TEKER.game.audio;
     const real = a.unlock.bind(a);
     window.__calls = 0;
     a.unlock = () => {
@@ -133,7 +133,7 @@ try {
   );
 
   // Third gesture is allowed through — the listeners must still be there.
-  await page.waitForFunction('TEKERLEK.game.modes.current?.state === "racing"', { timeout: 40000 });
+  await page.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 40000 });
   await page.keyboard.press('ArrowUp'); // gesture #3, this one really unlocks
   await sleep(900);
   const calls = await page.evaluate(() => window.__calls);

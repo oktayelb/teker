@@ -12,7 +12,7 @@
 
 import { events } from '../core/events.js';
 
-const STORAGE_KEY = 'tekerlek.settings.v1';
+const STORAGE_KEY = 'teker.settings.v1';
 
 const pct = (v) => `${Math.round(v * 100)}%`;
 const mult = (v) => `${v.toFixed(2)}×`;

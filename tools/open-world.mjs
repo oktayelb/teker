@@ -44,13 +44,13 @@ try {
   // nothing has announced that the story is over — which is exactly the state
   // the wildlife gate is supposed to sit closed in.
   await page.goto(`http://localhost:${PORT}/index.html?scene=open`, { waitUntil: 'load' });
-  await page.waitForFunction('globalThis.TEKERLEK?.game?.loop?.running === true', { timeout: 60000 });
-  await page.waitForFunction('TEKERLEK.game.player != null', { timeout: 40000 });
+  await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
+  await page.waitForFunction('TEKER.game.player != null', { timeout: 40000 });
 
   // -- 0. nothing is out while the cops might be ----------------------------
   console.log('\n— before the cops are ditched —');
   const shut = await page.evaluate(() => {
-    const w = TEKERLEK.game.world.wildlife;
+    const w = TEKER.game.world.wildlife;
     return { armed: w.armed, visible: w.root.visible };
   });
   console.log('   ', JSON.stringify(shut));
@@ -58,10 +58,10 @@ try {
   check('…and nothing is even drawn', shut.visible === false);
 
   // Ditch them.
-  await page.evaluate(() => TEKERLEK.events.emit('chase:escaped', { duration: 42 }));
+  await page.evaluate(() => TEKER.events.emit('chase:escaped', { duration: 42 }));
   await sleep(600);
   const open = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const w = g.world.wildlife;
     const v = g.player;
     let far = 0;
@@ -77,7 +77,7 @@ try {
   // -- 1. the population exists ---------------------------------------------
   console.log('\n— who lives here —');
   const census = await page.evaluate(() => {
-    const w = TEKERLEK.game.world.wildlife;
+    const w = TEKER.game.world.wildlife;
     if (!w) return null;
     const byKind = {};
     for (const g of w._groups) byKind[g.kind] = (byKind[g.kind] || 0) + g.items.length;
@@ -101,7 +101,7 @@ try {
   const solid = await page.evaluate(() => {
     const kinds = new Set();
     const seen = new Set();
-    for (const list of TEKERLEK.game.world.collision.cells.values()) {
+    for (const list of TEKER.game.world.collision.cells.values()) {
       for (const c of list) {
         if (seen.has(c)) continue;
         seen.add(c);
@@ -121,21 +121,21 @@ try {
   // ahead of it, and a 1000m jump is not locomotion.
   console.log('\n— they move —');
   await page.evaluate(() => {
-    const v = TEKERLEK.game.player;
+    const v = TEKER.game.player;
     v.velocity.set(0, 0, 0);
     v.speed = 0;
   });
   await sleep(1200);
   const before = await page.evaluate(() =>
-    TEKERLEK.game.world.wildlife._groups.map((g) => g.items.map((i) => [i.x, i.y, i.z]))
+    TEKER.game.world.wildlife._groups.map((g) => g.items.map((i) => [i.x, i.y, i.z]))
   );
   await sleep(2000);
   const after = await page.evaluate(() =>
-    TEKERLEK.game.world.wildlife._groups.map((g) => g.items.map((i) => [i.x, i.y, i.z]))
+    TEKER.game.world.wildlife._groups.map((g) => g.items.map((i) => [i.x, i.y, i.z]))
   );
   const moved = {};
   await page.evaluate(() => {}); // no-op, keeps the flow readable
-  const kinds = await page.evaluate(() => TEKERLEK.game.world.wildlife._groups.map((g) => g.kind));
+  const kinds = await page.evaluate(() => TEKER.game.world.wildlife._groups.map((g) => g.kind));
   for (let gi = 0; gi < before.length; gi++) {
     let max = 0;
     for (let i = 0; i < before[gi].length; i++) {
@@ -157,7 +157,7 @@ try {
   // -- 4. the pool follows the camera ---------------------------------------
   console.log('\n— the population follows you —');
   const follow = await page.evaluate(async () => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const w = g.world.wildlife;
     // Measure against a POINT, not against the camera: the camera lags the car
     // by a frame, so reading it straight after a teleport reports the old spot.
@@ -182,7 +182,7 @@ try {
   });
   await sleep(2500);
   const settled = await page.evaluate(() => {
-    const g = TEKERLEK.game;
+    const g = TEKER.game;
     const w = g.world.wildlife;
     const v = g.player;
     let n = 0;
@@ -202,7 +202,7 @@ try {
   // -- 5. civilisation -------------------------------------------------------
   console.log('\n— what people left behind —');
   const left = await page.evaluate(() => {
-    const s = TEKERLEK.game.world.scatter;
+    const s = TEKER.game.world.scatter;
     const counts = {};
     for (const c of s.colliders) counts[c.kind] = (counts[c.kind] || 0) + 1;
     const meshes = {};
@@ -220,7 +220,7 @@ try {
   if (SHOTS) {
     // Park next to a wreck and a poster so both are in frame.
     await page.evaluate(() => {
-      const g = TEKERLEK.game;
+      const g = TEKER.game;
       const w = g.world.scatter.colliders.find((c) => c.kind === 'wreck');
       const v = g.player;
       const a = Math.atan2(w.x, w.z);
@@ -234,7 +234,7 @@ try {
     await page.screenshot({ path: `${SHOTS}/world-wreck.png` });
 
     await page.evaluate(() => {
-      const g = TEKERLEK.game;
+      const g = TEKER.game;
       // Somewhere open, looking flat, so the animals read against the ground.
       const v = g.player;
       v.reset(new v.position.constructor(240, g.world.sampleGround(240, 240).height + 0.6, 240), 0.9);

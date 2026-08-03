@@ -1,5 +1,5 @@
 /**
- * AUDIO — every sound in TEKERLEK, synthesised from nothing.
+ * AUDIO — every sound in TEKER, synthesised from nothing.
  *
  * There are no asset files. There is no fetch. Every engine note, siren wail,
  * cricket and menu blip is built at runtime out of oscillators, noise buffers

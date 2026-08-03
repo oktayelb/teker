@@ -1,7 +1,7 @@
 {
-  "name": "tekerlek",
+  "name": "teker",
   "version": "0.1.0",
-  "description": "TEKERLEK — a racing game with a door in it.",
+  "description": "TEKER — a racing game with a door in it.",
   "scripts": {
     "dev": "python3 -m http.server 8000",
     "vendor": "node tools/vendor.mjs",

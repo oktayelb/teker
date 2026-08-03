@@ -1,7 +1,7 @@
 /**
- * LOGO — "Tek" | "erlek"
+ * LOGO — "Tek" | "er"
  *
- * The word is TEKERLEK (Turkish: "wheel"). It is rendered as two glyph runs so
+ * The word is TEKER (Turkish: "wheel"). It is rendered as two glyph runs so
  * the first three letters read as their own word: *tek* — "single, sole, the
  * only one". That is the entire premise of the game hiding in plain sight in
  * the title, and the player is not supposed to notice it on the first screen.
@@ -19,8 +19,8 @@
  */
 
 const TEK = 'Tek';
-const ERLEK = 'erlek';
-const FULL_WORD = TEK + ERLEK;
+const REST = 'er';
+const FULL_WORD = TEK + REST;
 
 /** Threshold where the seam starts animating rather than just sitting there. */
 const GLITCH_ON = 0.02;
@@ -65,7 +65,7 @@ export function createLogo({ size = 96, glitch = 0 } = {}) {
   const tek = makePart(TEK, 'tk-logo-tek');
   const seam = document.createElement('i');
   seam.className = 'tk-logo-seam';
-  const rest = makePart(ERLEK, 'tk-logo-rest');
+  const rest = makePart(REST, 'tk-logo-rest');
 
   word.append(tek, seam, rest);
   el.append(word);
@@ -103,7 +103,7 @@ export function createWordmark() {
   const tek = document.createElement('b');
   tek.textContent = TEK.toUpperCase();
   const rest = document.createElement('i');
-  rest.textContent = ERLEK.toUpperCase();
+  rest.textContent = REST.toUpperCase();
   el.append(tek, rest);
 
   let current = -1;

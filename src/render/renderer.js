@@ -94,7 +94,7 @@ export class RetroRenderer {
     // upgrade could break it in exactly that invisible way — so make it loud.
     this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
       const log = (s) => gl.getShaderInfoLog(s)?.trim();
-      const msg = `[tekerlek] SHADER COMPILE FAILED\nvertex: ${log(vs) || 'ok'}\nfragment: ${log(fs) || 'ok'}`;
+      const msg = `[teker] SHADER COMPILE FAILED\nvertex: ${log(vs) || 'ok'}\nfragment: ${log(fs) || 'ok'}`;
       console.error(msg);
       events.emit('render:shaderError', { message: msg });
     };
