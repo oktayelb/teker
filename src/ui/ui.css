@@ -269,7 +269,7 @@ body {
 }
 
 /* ===========================================================================
-   LOGO — "Tek" | "er"
+   LOGO — "Tek" | "Er"
    ---------------------------------------------------------------------------
    The split is the thesis of the game: *tek* is Turkish for "the only one".
    At --g:0 it must still read as one word, but wrong — a hairline seam and a
@@ -338,7 +338,7 @@ body {
     skewX(calc(var(--g) * -7deg));
 }
 
-/* "er": stays put, drifts slightly the other way so the word splits apart. */
+/* "Er": stays put, drifts slightly the other way so the word splits apart. */
 .tk-logo-rest {
   transform: translate(calc(var(--g) * 0.05em), calc(var(--g) * 0.02em));
 }

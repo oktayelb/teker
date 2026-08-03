@@ -7,7 +7,7 @@ left-hander is coated in ice and the barrier there was never installed. You slid
 wide, find nothing, and keep going — and the world outside the track turns out to
 be a real place you can drive around in. Thirty seconds later you hear sirens.
 
-The logo splits the word: **Tek**·er. *Tek* is Turkish for *single, sole, the
+The logo splits the word: **Tek**·Er. *Tek* is Turkish for *single, sole, the
 only one*.
 
 ---

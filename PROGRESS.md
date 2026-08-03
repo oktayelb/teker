@@ -42,7 +42,7 @@ Debug shortcuts (see `src/config/gameplay.js` → `DEBUG`):
 - [x] **P9 — Open world**: free roam, landmarks, points of interest
 - [x] **P10 — Chase**: cop AI, siren lights, heat/escape system
 - [x] **P11 — Audio**: procedural WebAudio (engine, siren, glitch, ambience)
-- [x] **P12 — UI**: Tek|er logo, HUD, screens, subtitle/narrative channel
+- [x] **P12 — UI**: Tek|Er logo, HUD, screens, subtitle/narrative channel
 - [x] **P13 — Intro director**: the decoupled first-run narrative sequence
 - [x] **P14 — Polish**: live tuning panel, pause, README, headless test suite
 

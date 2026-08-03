@@ -1,10 +1,11 @@
 /**
- * LOGO — "Tek" | "er"
+ * LOGO — "Tek" | "Er"
  *
- * The word is TEKER (Turkish: "wheel"). It is rendered as two glyph runs so
- * the first three letters read as their own word: *tek* — "single, sole, the
- * only one". That is the entire premise of the game hiding in plain sight in
- * the title, and the player is not supposed to notice it on the first screen.
+ * The word is TEKER (Turkish: "wheel"). It is rendered as two glyph runs, and
+ * the second one carries its own capital, so the first three letters read as
+ * their own word: *tek* — "single, sole, the only one". That is the entire
+ * premise of the game hiding in plain sight in the title, and the player is
+ * not supposed to notice it on the first screen.
  *
  * Which is why the split must NOT look like graphic design. It looks like a
  * defect: a hairline seam, a one-pixel vertical drift, a little channel bleed —
@@ -19,7 +20,7 @@
  */
 
 const TEK = 'Tek';
-const REST = 'er';
+const REST = 'Er';
 const FULL_WORD = TEK + REST;
 
 /** Threshold where the seam starts animating rather than just sitting there. */
