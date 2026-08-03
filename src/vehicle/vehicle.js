@@ -247,7 +247,10 @@ export class Vehicle {
       this.surface = surfaceById('TARMAC');
       return;
     }
-    const g = this.world.sampleGround(this.position.x, this.position.z);
+    // `this` is passed as the agent because the ground is not the same for
+    // everyone: a dome is only a surface for a car that has been outside it.
+    // See `World#sampleGround` and `src/world/dome.js`.
+    const g = this.world.sampleGround(this.position.x, this.position.z, this);
     this.groundNormal.copy(g.normal);
     this.surface = surfaceById(this.ignoreSurfaces ? 'TARMAC' : g.surface);
 
@@ -262,10 +265,10 @@ export class Vehicle {
       const rz = this.right.z * this.groundReachLat;
       const px = this.position.x;
       const pz = this.position.z;
-      const h1 = this.world.groundHeightAt(px + fx + rx, pz + fz + rz);
-      const h2 = this.world.groundHeightAt(px + fx - rx, pz + fz - rz);
-      const h3 = this.world.groundHeightAt(px - fx + rx, pz - fz + rz);
-      const h4 = this.world.groundHeightAt(px - fx - rx, pz - fz - rz);
+      const h1 = this.world.groundHeightAt(px + fx + rx, pz + fz + rz, this);
+      const h2 = this.world.groundHeightAt(px + fx - rx, pz + fz - rz, this);
+      const h3 = this.world.groundHeightAt(px - fx + rx, pz - fz + rz, this);
+      const h4 = this.world.groundHeightAt(px - fx - rx, pz - fz - rz, this);
       if (h1 > height) height = h1;
       if (h2 > height) height = h2;
       if (h3 > height) height = h3;
@@ -363,8 +366,12 @@ export class Vehicle {
         longAccel -= (T.brakeForce * this.brake * surf.grip * forceScale) / T.mass;
       }
       if (this.handbrake > 0.001) {
-        longAccel -=
-          ((T.handbrakeForce * this.handbrake * surf.grip * forceScale) / T.mass) * Math.sign(vLong);
+        // Clamped so it cannot push the car backwards through a standstill. An
+        // unclamped constant deceleration overshoots zero within a single step
+        // and reverses sign on the next one, which reads as a stationary car
+        // shivering rather than a stopped one.
+        const pull = (T.handbrakeForce * this.handbrake * surf.grip * forceScale) / T.mass;
+        longAccel -= Math.sign(vLong) * Math.min(pull, Math.abs(vLong) / dt);
       }
       // Coasting. `engineBraking` is deceleration in m/s² at top speed, falling
       // off linearly — so lifting off is a decision, not a cliff.
@@ -387,7 +394,13 @@ export class Vehicle {
     if (this.grounded) {
       const sliding = Math.abs(vLat) > T.slipThreshold;
       let grip = (sliding ? T.slideGrip : T.lateralGrip) * surf.grip * PACE.gripScale;
-      if (this.handbrake > 0.001) grip *= lerp(1, T.handbrakeGripScale, this.handbrake);
+      if (this.handbrake > 0.001) {
+        // Faded in with speed. Cutting rear grip is what makes a handbrake TURN
+        // work, and it only means anything while the car is moving — see
+        // `handbrakeSlideSpeed`.
+        const authority = this.handbrake * clamp01(this.speed / Math.max(T.handbrakeSlideSpeed, 0.01));
+        grip *= lerp(1, T.handbrakeGripScale, authority);
+      }
       const shed = 1 - Math.exp(-grip * dt);
       latAccel = (-vLat * shed) / dt;
       this.slip = clamp01(Math.abs(vLat) / (T.slipThreshold * 2));
@@ -444,12 +457,34 @@ export class Vehicle {
 
     const gravity = T.gravity * PACE.forceScale;
     if (this.grounded) {
-      // On a slope, gravity's in-plane component pulls you downhill. Without
-      // this, hills are decorative.
-      _gravityVec.set(0, -gravity, 0);
-      _slope.copy(this.groundNormal).multiplyScalar(_gravityVec.dot(this.groundNormal));
-      _slope.subVectors(_gravityVec, _slope);
-      this.velocity.addScaledVector(_slope, dt);
+      // THE HANDBRAKE HOLDS. A parked car is held by static friction, and static
+      // friction does not have a magnitude you race against gravity — it either
+      // holds or it does not, and on a car with the handbrake on it holds.
+      //
+      // Modelled as a force it never could: `handbrakeForce` is 9000 N and a
+      // 1100 kg car on a 20° slope is being pulled by about 9200, so the hill
+      // won by a whisker and the car crept downhill forever while the player
+      // held the key. Worse, the pull is only ever *longitudinal*, so parked
+      // across a slope there was nothing opposing the downhill component at all.
+      //
+      // So below walking pace a held handbrake simply parks the car: no
+      // horizontal velocity, and the slope is not applied. Above that speed
+      // nothing changes and a handbrake turn still works exactly as before.
+      const held =
+        this.handbrake > 0.5 &&
+        Math.hypot(this.velocity.x, this.velocity.z) < T.handbrakeHoldSpeed;
+      if (held) {
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+        if (this.velocity.y > 0) this.velocity.y = 0;
+      } else {
+        // On a slope, gravity's in-plane component pulls you downhill. Without
+        // this, hills are decorative.
+        _gravityVec.set(0, -gravity, 0);
+        _slope.copy(this.groundNormal).multiplyScalar(_gravityVec.dot(this.groundNormal));
+        _slope.subVectors(_gravityVec, _slope);
+        this.velocity.addScaledVector(_slope, dt);
+      }
     } else {
       this.velocity.y -= gravity * dt;
     }

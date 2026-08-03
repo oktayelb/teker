@@ -57,6 +57,24 @@ export const PROFILES = {
     handbrakeForce: 9000, // N — weaker, but see handbrakeGripScale
     /** While the handbrake is held, rear grip drops to this fraction. */
     handbrakeGripScale: 0.18,
+    /**
+     * …but only once the car is actually moving. Below this speed (m/s) the
+     * handbrake sheds no grip at all, ramping in to the full reduction above it.
+     *
+     * Shedding rear grip is for handbrake TURNS, which happen at speed. Applied
+     * at walking pace it did the opposite of what the handbrake is for: parked
+     * across a slope, the car had its grip cut to a fifth and slid sideways down
+     * the hill, forever, while the player held the brake on.
+     */
+    handbrakeSlideSpeed: 6.0,
+    /**
+     * Below this speed (m/s) a held handbrake PARKS the car: horizontal velocity
+     * is zeroed and the slope does not pull on it. Static friction, which is
+     * what a real handbrake uses and what a decelerating force cannot model —
+     * `handbrakeForce` opposing gravity down a 20° hill is a stalemate the hill
+     * wins, and the car creeps for as long as you hold the key.
+     */
+    handbrakeHoldSpeed: 1.6,
 
     // -- Resistance (this is your "friction") ------------------------------
     dragCoefficient: 0.42, // quadratic, air resistance: F = -k * v * |v|
@@ -220,6 +238,15 @@ export const SURFACES = {
   ICE: { id: 'ICE', grip: 0.12, drag: 0.5, power: 0.35, rumble: 0.08, dustColor: 0xcfe4ee },
   /** Outside the world's intended bounds. Deliberately wrong-feeling. */
   VOID: { id: 'VOID', grip: 0.85, drag: 0.8, power: 1.05, rumble: 0.15, dustColor: 0x2a2f44 },
+  /**
+   * GLASS — the roof of a parkour, once you are on top of one.
+   *
+   * Grippier and quieter than tarmac, and it throws nothing up behind you,
+   * because it is a polished pane a hundred feet in the air. Not slippery: the
+   * domes are already a place with no walls and a long way down, and making
+   * them slidey as well turns "look what you were inside" into a punishment.
+   */
+  GLASS: { id: 'GLASS', grip: 1.05, drag: 0.92, power: 1.0, rumble: 0.0, dustColor: null },
 };
 
 // ---------------------------------------------------------------------------
