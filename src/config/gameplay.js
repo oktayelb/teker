@@ -586,8 +586,33 @@ export const OPEN_WORLD = {
     fadeTo: 0.62,
     /** Grid cells per noise cycle for that patchiness. */
     fadeScale: 0.0075,
-    /** Wear above which grass stops growing. A path with grass on it is a lawn. */
-    grassFreeAbove: 0.45,
+    /**
+     * Wear above which nothing grows or stands: no grass, no trunk, no rock, no
+     * wreck. A path with grass down the middle of it is a lawn, and a path with
+     * a pine in the middle of it is not a path.
+     *
+     * One threshold for every scattered thing, deliberately — the forest and
+     * the ground cover already share one answer to "is this the road?" for the
+     * same reason (`World#_trackAvoidance`). Two rules here would clear grass
+     * from ground that still had trees on it, which reads as a mown verge.
+     */
+    clearAbove: 0.45,
+    /**
+     * …and the wear above which the ground DRIVES like a path — the band that
+     * reports `SURFACES.TRAIL` instead of the grass under it.
+     *
+     * MUST BE >= `clearAbove`, and `npm test` asserts it. The corridor you can
+     * drive has to sit inside the corridor that was cleared, or the game hands
+     * the player a fast line with trees standing in it. The margin between the
+     * two is the shoulder: worn enough that nothing grows there, not worn
+     * enough to be the path.
+     *
+     * At the current widths this is roughly a 23m corridor where the
+     * along-route noise has not grown the trail over — comfortably wider than a
+     * car, and interrupted often enough that following a trail is reading the
+     * ground rather than staying between two lines.
+     */
+    driveAbove: 0.55,
   },
   /** Seed for world generation — same seed, same world, every time. */
   seed: 0x7e4e17,

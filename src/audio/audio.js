@@ -259,6 +259,7 @@ export const AUDIO_CONFIG = {
    */
   SURFACES: {
     TARMAC: { hz: 900, q: 0.8, gain: 0.3, squeal: 1.0, rate: 1.0 },
+    TRAIL: { hz: 1150, q: 0.65, gain: 0.44, squeal: 0.6, rate: 1.05 }, // packed earth: between the two below, and audibly so
     DIRT: { hz: 1500, q: 0.55, gain: 0.55, squeal: 0.45, rate: 1.15 }, // brighter, louder: gravel spray
     GRASS: { hz: 700, q: 0.7, gain: 0.4, squeal: 0.2, rate: 0.9 }, // soft brush
     MUD: { hz: 380, q: 0.9, gain: 0.5, squeal: 0.1, rate: 0.8 }, // thick, dark, no squeal

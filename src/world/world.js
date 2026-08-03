@@ -201,13 +201,13 @@ export class World {
         // stops on the worn routes: a path with grass growing down the middle
         // of it is a lawn, and the ground under it is already painted as bare.
         const offRoad = this._trackAvoidance(OPEN_WORLD.groundCover.trackClearance);
-        const worn = OPEN_WORLD.trails.grassFreeAbove;
+        const avoidTrails = this._trailAvoidance();
         this.groundCover = new GroundCover({
           terrain: this.terrain,
           materials: this.materials,
           theme: this.theme,
           seed: this.seed ^ 0x6c0f,
-          avoid: (x, z) => offRoad(x, z) || this.trails.strengthAt(x, z) > worn,
+          avoid: (x, z) => offRoad(x, z) || avoidTrails(x, z),
         }).build();
         this.root.add(this.groundCover.root);
       });
@@ -228,6 +228,26 @@ export class World {
     this._built = true;
     events.emit('world:built', { tracks: [...this.tracks.keys()] });
     return this;
+  }
+
+  /**
+   * A predicate that rejects anywhere the ground is already worn.
+   *
+   * The sibling of `_trackAvoidance`, and shared by everything that grows or
+   * stands for exactly the same reason: one answer to "has this ground been
+   * used?" Grass has always obeyed it. The forest now does too, because a trail
+   * you can drive faster along is worth nothing if a pine is standing in it —
+   * and a trail with a pine standing in it was never a trail, it was a stripe.
+   *
+   * `OPEN_WORLD.trails.clearAbove` is deliberately *below* `driveAbove`, so the
+   * cleared band is wider than the drivable one and the corridor the player can
+   * read is empty by construction rather than by luck.
+   *
+   * @returns {(x:number, z:number)=>boolean} true = do not place here
+   */
+  _trailAvoidance() {
+    const worn = OPEN_WORLD.trails.clearAbove;
+    return (x, z) => this.trails != null && this.trails.strengthAt(x, z) > worn;
   }
 
   /**
@@ -307,7 +327,15 @@ export class World {
 
     // Keep props off the racing surface and its run-off, but let them creep
     // right up to the edge — the forest should feel like it is pressing in.
+    // And off the worn routes, which is what makes a trail somewhere the player
+    // can GO rather than somewhere that is merely coloured differently.
+    //
+    // The two are folded into one predicate that every placement below takes,
+    // rather than added per kind, so there is nothing to remember when a new
+    // prop is scattered — and so ground that is used is used for everything.
     const avoidTracks = this._trackAvoidance(3.5);
+    const avoidTrails = this._trailAvoidance();
+    const avoidUsed = (x, z) => avoidTracks(x, z) || avoidTrails(x, z);
     // Trees, and only trees, also keep off the ring where the glass comes down
     // to meet the earth: a band forty-odd metres wide at each dome's rim, and
     // nowhere else. Under the middle of a dome the roof is sixty metres up and
@@ -316,15 +344,15 @@ export class World {
     // seating a dome in a forest would actually take. Rocks and bushes are
     // waist-high and stay, so the ring reads as cleared rather than as sterile.
     const skewered = this.domes ? this.domes.skewerAvoidance(this.terrain) : () => false;
-    const avoidTrees = (x, z) => avoidTracks(x, z) || skewered(x, z);
+    const avoidTrees = (x, z) => avoidUsed(x, z) || skewered(x, z);
 
     const D = OPEN_WORLD.scatterDensity;
     const span = this.terrain.halfSpan;
     s.place({ kind: 'pine', count: Math.round(D.trees * 0.62), region: { radius: span * 0.97 }, avoid: avoidTrees });
     s.place({ kind: 'broadleaf', count: Math.round(D.trees * 0.28), region: { radius: span * 0.9 }, avoid: avoidTrees });
     s.place({ kind: 'dead', count: Math.round(D.trees * 0.1), region: { inner: span * 0.3, radius: span * 0.97 }, avoid: avoidTrees });
-    s.place({ kind: 'rock', count: D.rocks, region: { radius: span * 0.97 }, avoid: avoidTracks });
-    s.place({ kind: 'bush', count: D.bushes, region: { radius: span * 0.95 }, avoid: avoidTracks });
+    s.place({ kind: 'rock', count: D.rocks, region: { radius: span * 0.97 }, avoid: avoidUsed });
+    s.place({ kind: 'bush', count: D.bushes, region: { radius: span * 0.95 }, avoid: avoidUsed });
     // THE UNDERSTOREY, placed after the canopy it belongs under and *because*
     // of it: `_treeProximity` rejects anywhere that is not within reach of a
     // trunk that has already gone in. Everything from here down is scenery you
@@ -333,19 +361,19 @@ export class World {
       s.colliders.filter((c) => c.kind === 'pine' || c.kind === 'broadleaf'),
       OPEN_WORLD.understoreyRadius
     );
-    const underCanopy = (x, z) => avoidTracks(x, z) || nearTrees(x, z);
+    const underCanopy = (x, z) => avoidUsed(x, z) || nearTrees(x, z);
     s.place({ kind: 'fern', count: D.ferns, region: { radius: span * 0.95 }, avoid: underCanopy });
     s.place({ kind: 'undergrowth', count: D.undergrowth, region: { radius: span * 0.95 }, avoid: underCanopy });
     s.place({ kind: 'litter', count: D.litter, region: { radius: span * 0.95 }, avoid: underCanopy });
     // Grass is NOT scattered. It is a pool that follows the camera — see
     // `groundCover.js` and `OPEN_WORLD.groundCover`.
-    s.place({ kind: 'log', count: Math.round(D.rocks * 0.35), region: { radius: span * 0.9 }, avoid: avoidTracks });
+    s.place({ kind: 'log', count: Math.round(D.rocks * 0.35), region: { radius: span * 0.9 }, avoid: avoidUsed });
     // Blank signs only exist away from the tracks. Nobody was meant to read them.
-    s.place({ kind: 'sign', count: 90, region: { inner: span * 0.25, radius: span * 0.9 }, avoid: avoidTracks });
+    s.place({ kind: 'sign', count: 90, region: { inner: span * 0.25, radius: span * 0.9 }, avoid: avoidUsed });
     // Signs somebody left, and cars somebody left. Kept off the inner ring so
     // the first thing past the tracks is still forest.
-    s.place({ kind: 'poster', count: D.posters, region: { inner: span * 0.12, radius: span * 0.92 }, avoid: avoidTracks });
-    s.place({ kind: 'wreck', count: D.wrecks, region: { inner: span * 0.15, radius: span * 0.9 }, avoid: avoidTracks });
+    s.place({ kind: 'poster', count: D.posters, region: { inner: span * 0.12, radius: span * 0.92 }, avoid: avoidUsed });
+    s.place({ kind: 'wreck', count: D.wrecks, region: { inner: span * 0.15, radius: span * 0.9 }, avoid: avoidUsed });
 
     this.root.add(s.root);
     this.collision.insertAll(s.colliders);
@@ -437,6 +465,34 @@ export class World {
     const terrainH = this.terrain.heightAt(x, z);
     let height = terrainH;
     let surface = this.terrain.surfaceAt(x, z);
+
+    // A worn route drives like one.
+    //
+    // WHY THIS IS NOT IN THE SURFACE GRID. Every other surface in the world is
+    // baked per terrain vertex by `Terrain#_classifySurfaces`, and this one
+    // cannot be: the grid carries one sample every 13 metres and `surfaceAt`
+    // snaps to the nearest, so a trail baked into it would drive as square
+    // 13m blocks that do not line up with the band you can see. The trail
+    // field is continuous, so we ask it directly and the surface you feel is
+    // the same function as the colour you are looking at — the same contract
+    // `heightAt` keeps with the mesh, one layer up.
+    //
+    // Cheap enough to sit in the per-step path: `strengthAt` is one hash-grid
+    // lookup, and in open forest — which is nearly everywhere — that lookup
+    // misses and the query is over.
+    //
+    // Only over the ground the forest grew on. A worn line across a bog is
+    // still a bog, and MUD near the water is a hazard the player can see; a
+    // trail is not allowed to quietly cancel one. The tracks below then
+    // override this in turn, so a spur meeting its parkour becomes road at the
+    // verge rather than staying a path across it.
+    if (
+      this.trails &&
+      (surface === 'GRASS' || surface === 'DIRT') &&
+      this.trails.strengthAt(x, z) > OPEN_WORLD.trails.driveAbove
+    ) {
+      surface = 'TRAIL';
+    }
 
     // Roads override both height and surface. Using the ribbon's own elevation
     // (rather than the coarse heightfield) is what keeps the tarmac glass-smooth

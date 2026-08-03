@@ -219,6 +219,30 @@ export const ACTIVE_PROFILE = 'hatchback';
 
 export const SURFACES = {
   TARMAC: { id: 'TARMAC', grip: 1.0, drag: 1.0, power: 1.0, rumble: 0.0, dustColor: null },
+  /**
+   * TRAIL — ground somebody has already driven over enough to wear it bare.
+   *
+   * The only surface in this file that exists to SAY something rather than to
+   * make a corner harder. The worn routes through the forest have always been
+   * drawn (`src/world/trails.js` paints them into the terrain's own vertex
+   * colours); until this entry they *drove* like the grass either side of them,
+   * so a path was a texture, and the player had no reason to believe one went
+   * anywhere.
+   *
+   * Between DIRT and TARMAC, and nearer DIRT. That gap is the entire teaching
+   * mechanism: nothing tells the player the trails are worth following, and
+   * about thirty seconds after the first one is crossed at speed, the car has.
+   *
+   * Two ceilings on `grip`, in both directions. Much past ~0.9 and the trails
+   * become a road network, which takes away the three parkours being the only
+   * built thing in the world. Below ~0.7 it sits inside GRASS's own variation
+   * and there is no signal to read at all.
+   *
+   * Where it applies is `World#sampleGround` — the trail field is continuous,
+   * so unlike every other entry here it is never produced by the terrain's
+   * surface grid. See the note there.
+   */
+  TRAIL: { id: 'TRAIL', grip: 0.82, drag: 1.15, power: 0.96, rumble: 0.22, dustColor: 0x7a6446 },
   DIRT: { id: 'DIRT', grip: 0.74, drag: 1.25, power: 0.92, rumble: 0.35, dustColor: 0x8a7355 },
   GRASS: { id: 'GRASS', grip: 0.6, drag: 1.7, power: 0.8, rumble: 0.5, dustColor: 0x5f7a44 },
   MUD: { id: 'MUD', grip: 0.42, drag: 2.3, power: 0.68, rumble: 0.7, dustColor: 0x5b4a35 },

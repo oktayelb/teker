@@ -1653,10 +1653,138 @@ section('12. somebody was here first');
         g.mesh.getMatrixAt(i, mm);
         const e = mm.elements;
         if (Math.hypot(e[0], e[1], e[2]) < 1e-4) continue;
-        if (trails.strengthAt(e[12], e[14]) > T.grassFreeAbove) onPath++;
+        if (trails.strengthAt(e[12], e[14]) > T.clearAbove) onPath++;
       }
     }
     ok('grass does not grow on a worn path', onPath === 0, `${onPath} tufts on the trail`);
+  }
+
+  // ---------------------------------------------------------------------
+  // …AND THE PATH DRIVES LIKE ONE.
+  //
+  // The whole point of the network. It was colour for as long as it existed;
+  // a trail that reports the same surface as the grass beside it is a texture,
+  // and the player has no reason to believe it goes anywhere. These checks are
+  // the ones that keep it a mechanic.
+  {
+    const { SURFACES } = await import('../src/config/tuning.js');
+    const trail = SURFACES.TRAIL;
+
+    ok('there is a TRAIL surface', !!trail && trail.id === 'TRAIL');
+    ok(
+      '…and it sits between the forest floor and the road',
+      trail.grip > SURFACES.DIRT.grip && trail.grip < SURFACES.TARMAC.grip,
+      `grass ${SURFACES.GRASS.grip} < dirt ${SURFACES.DIRT.grip} < trail ${trail.grip} < tarmac ${SURFACES.TARMAC.grip}`
+    );
+    ok(
+      '…by enough to feel: a trail out-grips grass by a third',
+      trail.grip / SURFACES.GRASS.grip > 1.3,
+      `${(trail.grip / SURFACES.GRASS.grip).toFixed(2)}x the grip of grass`
+    );
+    ok(
+      'the drivable band sits inside the cleared band',
+      T.driveAbove >= T.clearAbove,
+      `cleared above ${T.clearAbove}, drivable above ${T.driveAbove}`
+    );
+
+    // Drive the field, not the config: walk every route and ask the WORLD what
+    // the ground is, which is the same question the car asks.
+    let onTrail = 0;
+    let samples = 0;
+    const strays = {};
+    for (const route of trails.routes) {
+      for (let i = 1; i < route.length - 1; i++) {
+        const p = route[i];
+        // Skip anywhere a parkour has its own opinion; a road overrides a
+        // trail on purpose and is checked separately below.
+        if (toTrack(p) < 60) continue;
+        samples++;
+        const g = world.sampleGround(p.x, p.z);
+        if (g.surface === 'TRAIL') onTrail++;
+        else if (trails.strengthAt(p.x, p.z) > T.driveAbove) {
+          strays[g.surface] = (strays[g.surface] || 0) + 1;
+        }
+      }
+    }
+    ok(
+      'the middle of a worn route drives as TRAIL',
+      samples > 40 && onTrail / samples > 0.5,
+      `${onTrail}/${samples} route centres report TRAIL`
+    );
+    // The one exception, and it is deliberate: a worn line across a bog is
+    // still a bog. MUD near the water is a hazard the player can see, and a
+    // trail is not allowed to quietly cancel one. Anything ELSE turning up
+    // here means the override in `sampleGround` has grown a hole.
+    const strayKinds = Object.keys(strays).filter((k) => k !== 'MUD');
+    ok(
+      '…and the only worn ground that is not a path is the wet kind',
+      strayKinds.length === 0,
+      Object.entries(strays).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'
+    );
+
+    // Off the path, the forest is still the forest. Sampled 60m to the side of
+    // every route centre — far outside `edgeWidth`.
+    let beside = 0;
+    let besideTrail = 0;
+    for (const route of trails.routes) {
+      for (let i = 1; i < route.length - 1; i++) {
+        const a = route[i - 1];
+        const b = route[i + 1];
+        const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+        for (const side of [1, -1]) {
+          const x = route[i].x + ((-(b.z - a.z) / len) * 60 * side);
+          const z = route[i].z + (((b.x - a.x) / len) * 60 * side);
+          if (!terrain.contains(x, z) || toTrack({ x, z }) < 60) continue;
+          beside++;
+          if (world.sampleGround(x, z).surface === 'TRAIL') besideTrail++;
+        }
+      }
+    }
+    ok('the forest either side of it is not a path', beside > 40 && besideTrail === 0,
+      `${besideTrail}/${beside} samples 60m off-route report TRAIL`);
+
+    // A parkour still wins where the two meet — a spur arriving at the road
+    // becomes road, rather than staying a path drawn across it.
+    {
+      const spur = trails.routes.at(-1);
+      const g = world.sampleGround(spur[0].x, spur[0].z);
+      ok('a road still beats a trail where they cross', g.surface !== 'TRAIL', `spur start reports ${g.surface}`);
+    }
+
+    // Nothing stands in the corridor. This is the difference between a trail
+    // that leads somewhere and a trail with a pine tree in it.
+    {
+      let blocking = 0;
+      for (const c of world.scatter.colliders) {
+        if (trails.strengthAt(c.x, c.z) > T.driveAbove) blocking++;
+      }
+      ok('nothing is standing in the drivable corridor', blocking === 0,
+        `${blocking} colliders on a drivable trail`);
+    }
+
+    // The tyres have to have something to say about it too, or the strongest
+    // cue in the game is one the player only feels through the steering.
+    {
+      const { AUDIO_CONFIG } = await import('../src/audio/audio.js');
+      const tone = AUDIO_CONFIG.SURFACES.TRAIL;
+      ok('a trail sounds like a trail', !!tone && tone.hz !== AUDIO_CONFIG.SURFACES.GRASS.hz,
+        tone ? `${tone.hz}Hz vs grass ${AUDIO_CONFIG.SURFACES.GRASS.hz}Hz` : 'missing');
+    }
+
+    // And it must not cost anything: `sampleGround` runs several times per car
+    // per 120Hz step, and this added a spatial query to it.
+    {
+      const span = terrain.halfSpan * 0.8;
+      const t0 = performance.now();
+      const N = 20000;
+      for (let i = 0; i < N; i++) {
+        const a = (i * 2.399963) % (Math.PI * 2);
+        const r = ((i * 37) % 1000) / 1000 * span;
+        world.sampleGround(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      const per = ((performance.now() - t0) * 1000) / N;
+      ok('asking the ground what it is stayed cheap', per < 12, `${per.toFixed(2)}µs per sampleGround`);
+    }
   }
 
   // Deterministic from the seed, like everything else that generates the world.
