@@ -69,6 +69,8 @@ export class Game {
 
     this._boundResize = () => this._onResize();
     this._debugPanel = null;
+    /** Held state of the horn, so a press and its release always pair up. */
+    this._hornDown = false;
   }
 
   get materials() {
@@ -382,12 +384,17 @@ export class Game {
 
   _wireGlobalKeys() {
     events.on('input:key', ({ code, down, shift }) => {
-      if (!down) return;
       // Read raw key events rather than the input state, so these still work
       // while the human's driving controls are locked during a cutscene.
       // Matched against BINDINGS rather than literals so rebinding a key at
       // runtime moves the global keys with everything else.
       const bound = (action) => BINDINGS[action]?.includes(code);
+
+      // The horn is the one global key that cares about key-UP as well, which
+      // is why it is handled above the `down` gate rather than beside the rest.
+      if (bound('horn')) this.setHorn(down);
+
+      if (!down) return;
 
       if (bound('cycleCamera')) {
         const next = this.camera.cycleRig(1);
@@ -398,6 +405,39 @@ export class Game {
       if (bound('debugPanel')) this.toggleDebugPanel();
       if (bound('pause')) this.togglePause();
     });
+  }
+
+  /**
+   * The horn.
+   *
+   * `AudioEngine#playHorn` has existed since P11 and `BINDINGS.horn` since P22,
+   * and until now the two had never met. It is on `Game` for the same reason
+   * the headlights are: it is a property of the car rather than a rule, so a
+   * mode that owned it would have to be copied into every other mode.
+   *
+   * WHERE IT DIFFERS FROM THE OTHER GLOBAL KEYS. They are deliberately allowed
+   * through `input.setLocked(true)`, because being unable to see or to look at
+   * the map during a cutscene is a broken game rather than a scene. The horn is
+   * the opposite: it is the human speaking, and while the human's hands are off
+   * the wheel it should be off the horn too. Same for a paused game, where the
+   * car is not even being simulated.
+   *
+   * The RELEASE is never gated. A press that was allowed and a release that was
+   * not would leave the tone sounding until `HORN.maxHoldSec` cut it off — a
+   * gate on the way in must never become a latch on the way out.
+   *
+   * @param {boolean} down true on press, false on release
+   */
+  setHorn(down) {
+    const on = !!down;
+    // Held state is tracked here rather than left to the audio engine so a
+    // gated press cannot be followed by an ungated release that emits a `false`
+    // nobody ever asked for. A listener sees pairs or it sees nothing.
+    if (on === this._hornDown) return;
+    if (on && (this.input.locked || this.loop.paused)) return;
+    this._hornDown = on;
+    this.audio.playHorn(on);
+    events.emit('player:horn', { down: on });
   }
 
   /**

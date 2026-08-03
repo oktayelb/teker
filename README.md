@@ -21,6 +21,6 @@ Sonra tarayıcıda [http://localhost:8000](http://localhost:8000) adresini aç.
 
 Sürüş: `W A S D` ya da yön tuşları · `Space` el freni · `Esc` menü.
 
-`H` harita · `Shift`+`H` yakınlaştırma · `C` kamera · `F` farlar.
+`H` harita · `Shift`+`H` yakınlaştırma · `C` kamera · `F` farlar · `B` korna.
 
 
