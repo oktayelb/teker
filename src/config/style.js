@@ -141,6 +141,11 @@ export const THEMES = {
       canopyC: 0x26421f,
       bush: 0x395c2c,
       grassBlade: 0x5f8040,
+      /** Ferns and the low stuff under the canopy — deeper and bluer than turf,
+       *  because almost nothing down there is in direct sun. */
+      fern: 0x33552a,
+      /** Fallen leaves. The one warm colour on the forest floor. */
+      litter: 0x6a5330,
     },
     props: {
       rock: 0x6e6a60,
@@ -260,6 +265,8 @@ export const THEMES = {
       canopyC: 0x0e1a0c,
       bush: 0x16240f,
       grassBlade: 0x1f2c16,
+      fern: 0x121f0e,
+      litter: 0x2a2216,
     },
     ui: { ink: 0xdfe6f0, accent: 0xff2a2a, accentAlt: 0x2a6aff },
     grade: { lift: 0.035, gain: 1.2, saturation: 0.78, tint: 0xb8c6e0 },

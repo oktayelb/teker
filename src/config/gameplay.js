@@ -310,10 +310,23 @@ export const OPEN_WORLD = {
     trees: 4200,
     rocks: 900,
     bushes: 2400,
+    /** The understorey. Placed only within `understoreyRadius` of a trunk. */
+    ferns: 1600,
+    undergrowth: 1500,
+    litter: 1700,
     /** Somebody was out here. Sparse on purpose — finding one should register. */
     posters: 140,
     wrecks: 70,
   },
+  /**
+   * How far from a trunk ferns, undergrowth and leaf litter will grow, metres.
+   *
+   * This is what makes the understorey an *understorey* rather than a second
+   * even scattering: the trees go down first, and everything low is then only
+   * offered ground within this radius of one of them. Widen it and the forest
+   * floor becomes a meadow; narrow it and you get neat rings around trunks.
+   */
+  understoreyRadius: 15,
   /** Draw distance for scattered props, metres. Fog hides the pop-in. */
   scatterDrawDistance: 340,
 

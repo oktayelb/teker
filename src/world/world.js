@@ -231,6 +231,51 @@ export class World {
     };
   }
 
+  /**
+   * A predicate that rejects anywhere NOT within `radius` of a tree that has
+   * already been planted.
+   *
+   * The understorey has to come after the canopy, in both senses: it is placed
+   * after the trees, and it is placed *because of* them. Handing this to
+   * `Scatter#place` as its `avoid` is what turns a second even scattering of
+   * ferns into a forest floor.
+   *
+   * Buckets the trunks into a grid at exactly the query radius, so a lookup
+   * touches four cells and nothing else. With 4200 trees a linear scan per
+   * attempt would be sixty million distance tests over the three placements.
+   *
+   * @param {object[]} colliders `Scatter#colliders`, filtered by `kind`
+   * @param {number} radius metres
+   * @returns {(x:number, z:number)=>boolean} true = do not place here
+   */
+  _treeProximity(colliders, radius) {
+    const cell = radius;
+    const grid = new Map();
+    for (const c of colliders) {
+      const key = Math.floor(c.x / cell) + ',' + Math.floor(c.z / cell);
+      let list = grid.get(key);
+      if (!list) grid.set(key, (list = []));
+      list.push(c);
+    }
+    const r2 = radius * radius;
+    return (x, z) => {
+      const gi = Math.floor(x / cell);
+      const gj = Math.floor(z / cell);
+      for (let j = gj - 1; j <= gj + 1; j++) {
+        for (let i = gi - 1; i <= gi + 1; i++) {
+          const list = grid.get(i + ',' + j);
+          if (!list) continue;
+          for (let k = 0; k < list.length; k++) {
+            const dx = list[k].x - x;
+            const dz = list[k].z - z;
+            if (dx * dx + dz * dz <= r2) return false;
+          }
+        }
+      }
+      return true;
+    };
+  }
+
   _scatterForest() {
     const s = new Scatter({
       terrain: this.terrain,
@@ -251,6 +296,18 @@ export class World {
     s.place({ kind: 'dead', count: Math.round(D.trees * 0.1), region: { inner: span * 0.3, radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'rock', count: D.rocks, region: { radius: span * 0.97 }, avoid: avoidTracks });
     s.place({ kind: 'bush', count: D.bushes, region: { radius: span * 0.95 }, avoid: avoidTracks });
+    // THE UNDERSTOREY, placed after the canopy it belongs under and *because*
+    // of it: `_treeProximity` rejects anywhere that is not within reach of a
+    // trunk that has already gone in. Everything from here down is scenery you
+    // drive straight through, so none of it produces a collider.
+    const nearTrees = this._treeProximity(
+      s.colliders.filter((c) => c.kind === 'pine' || c.kind === 'broadleaf'),
+      OPEN_WORLD.understoreyRadius
+    );
+    const underCanopy = (x, z) => avoidTracks(x, z) || nearTrees(x, z);
+    s.place({ kind: 'fern', count: D.ferns, region: { radius: span * 0.95 }, avoid: underCanopy });
+    s.place({ kind: 'undergrowth', count: D.undergrowth, region: { radius: span * 0.95 }, avoid: underCanopy });
+    s.place({ kind: 'litter', count: D.litter, region: { radius: span * 0.95 }, avoid: underCanopy });
     // Grass is NOT scattered. It is a pool that follows the camera — see
     // `groundCover.js` and `OPEN_WORLD.groundCover`.
     s.place({ kind: 'log', count: Math.round(D.rocks * 0.35), region: { radius: span * 0.9 }, avoid: avoidTracks });

@@ -272,6 +272,29 @@ that number and it never fires, which is exactly why the ground used to read as
 tinted noise. The thresholds in `GROUND_PAINT` are absolute, and the measured
 percentiles are written down next to them.
 
+### The understorey is placed by the canopy
+
+Ferns, low broad-leaved undergrowth and leaf litter (`createFern`,
+`createUndergrowth`, `createLitter`) go through the same `Scatter` as
+everything else, but they are placed **after** the trees and **because** of
+them: `World#_treeProximity` buckets every trunk that has already gone in and
+rejects any spot further than `OPEN_WORLD.understoreyRadius` from one. That is
+the difference between a forest floor and a second even scattering of ferns —
+median distance from a fern to a pine is 11.5 m, against 24 m for open ground.
+
+The tempting alternative is to give the understorey the pine's own
+`clumpScale`, on the theory that two kinds sampling the same noise field at the
+same frequency clump in the same places. They do — but that field's features
+are 450 m across, so it correlates them with the broad regions the forest is
+dense in and not with any actual tree. It buys about a 20% improvement and
+looks like nothing.
+
+None of it has a collider; you plough straight through all of it. Leaf litter
+is the one prop with a vertical constraint: `Scatter` sinks every prop 8 cm and
+never tilts anything to the ground, so the litter geometry has to start above
+that by itself, and `npm test` asserts the lowest piece still clears the sink at
+minimum scale.
+
 ### Somebody was here first
 
 `src/world/trails.js` wears routes into the world: one from each landmark down
@@ -372,10 +395,11 @@ That is the seam. Some places to build from:
 
 ## Testing
 
-`npm test` runs 232 checks headlessly — module graph, the intro-decoupling
+`npm test` runs 247 checks headlessly — module graph, the intro-decoupling
 contract, config resolution, world generation, road smoothness, seed determinism,
 collision, ground-cover placement, the vertex-wind injection, the terrain's own
-vertex colours, the worn trails, the settings round trip, and the physics:
+vertex colours, the worn trails, the understorey, the settings round trip, and
+the physics:
 0–100, top speed, braking, understeer on ice, and a simulated human driving the
 third parkour's corner and coming off it.
 

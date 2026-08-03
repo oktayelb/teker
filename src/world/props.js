@@ -247,6 +247,152 @@ export function createGrassTuft(theme, rng, scaleHint = 1, opts = null) {
   return { geometry: b.build(), collider: null, tag: 'grass', height: tallest };
 }
 
+/**
+ * Fern: a rosette of arching fronds.
+ *
+ * A frond is TWO triangles, arranged as a lance — pointed where it leaves the
+ * crown, widest in the middle, pointed again at the tip. A rectangle costs the
+ * same two triangles and reads as a strip of tape; the two points are the
+ * entire difference between a fern and a flag. They arch outward and over,
+ * because a frond held straight up is a blade of grass.
+ */
+export function createFern(theme, rng, scaleHint = 1) {
+  const b = new GeomBuilder();
+  const F = theme.foliage;
+  const fronds = rng.int(4, 6);
+  const h = rng.range(0.5, 1.05) * scaleHint;
+  const spin = rng.range(0, Math.PI * 2);
+  const step = (Math.PI * 2) / fronds;
+
+  for (let i = 0; i < fronds; i++) {
+    const a = spin + i * step + rng.range(-0.3, 0.3);
+    const len = h * rng.range(0.8, 1.2);
+    const reach = len * rng.range(0.55, 0.95);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    // Across the frond, so the lance has width to be seen from the side.
+    const halfW = len * rng.range(0.13, 0.2);
+    const px = -sin * halfW;
+    const pz = cos * halfW;
+    // Mid-point is out and up; the tip is further out and has started to fall.
+    const mx = cos * reach * 0.45;
+    const mz = sin * reach * 0.45;
+    const my = len * 0.62;
+    const tx = cos * reach;
+    const tz = sin * reach;
+    const ty = len * rng.range(0.7, 0.95);
+
+    const tone = rng.range(-0.05, 0.05);
+    b.addTriangle(
+      new THREE.Vector3(0, len * 0.1, 0),
+      new THREE.Vector3(mx + px, my, mz + pz),
+      new THREE.Vector3(mx - px, my, mz - pz),
+      shade(F.fern, tone - 0.05)
+    );
+    b.addTriangle(
+      new THREE.Vector3(mx - px, my, mz - pz),
+      new THREE.Vector3(mx + px, my, mz + pz),
+      new THREE.Vector3(tx, ty, tz),
+      shade(F.fern, tone + 0.06)
+    );
+  }
+  return { geometry: b.build(), collider: null, tag: 'fern', height: h };
+}
+
+/**
+ * Undergrowth: the low broad-leaved stuff that fills the gaps between ferns.
+ *
+ * Four flat leaves lying almost horizontally, which is what makes it read as a
+ * different plant to the fern standing next to it rather than a smaller one.
+ * Nothing under a canopy grows tall; it grows sideways, at the light.
+ */
+export function createUndergrowth(theme, rng, scaleHint = 1) {
+  const b = new GeomBuilder();
+  const F = theme.foliage;
+  const leaves = rng.int(3, 5);
+  const size = rng.range(0.35, 0.8) * scaleHint;
+  const spin = rng.range(0, Math.PI * 2);
+  const step = (Math.PI * 2) / leaves;
+  const base = rng.bool(0.35) ? F.bush : F.fern;
+
+  for (let i = 0; i < leaves; i++) {
+    const a = spin + i * step + rng.range(-0.4, 0.4);
+    const len = size * rng.range(0.85, 1.3);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const w = len * rng.range(0.3, 0.45);
+    // Almost flat, tipped just enough to catch a different shade of light.
+    const lift = size * rng.range(0.12, 0.34);
+    const stem = size * 0.14;
+    b.addQuad(
+      new THREE.Vector3(-sin * stem * 0.5, stem, cos * stem * 0.5),
+      new THREE.Vector3(sin * stem * 0.5, stem, -cos * stem * 0.5),
+      new THREE.Vector3(cos * len + sin * w, lift, sin * len - cos * w),
+      new THREE.Vector3(cos * len - sin * w, lift, sin * len + cos * w),
+      shade(base, rng.range(-0.06, 0.08))
+    );
+  }
+  return { geometry: b.build(), collider: null, tag: 'undergrowth', height: size * 0.4 };
+}
+
+/**
+ * Leaf litter and twigs — the forest floor itself.
+ *
+ * A handful of small quads lying nearly flat, plus a couple of sticks. Kept
+ * DELIBERATELY SMALL, under half a metre across, and lifted a little clear of
+ * the origin. `Scatter` sinks every prop 8cm and does not tilt anything to the
+ * ground, so a wide flat patch on a slope has one edge in the air and the other
+ * buried. A small patch sinks a centimetre at worst, and leaves that are half
+ * in the soil are leaves.
+ */
+export function createLitter(theme, rng, scaleHint = 1) {
+  const b = new GeomBuilder();
+  const F = theme.foliage;
+  const spread = rng.range(0.3, 0.45) * scaleHint;
+  const pieces = rng.int(2, 4);
+
+  for (let i = 0; i < pieces; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    const r = spread * rng.range(0.1, 1);
+    const cx = Math.cos(a) * r;
+    const cz = Math.sin(a) * r;
+    const y = 0.13 + rng.range(0, 0.09);
+    const w = spread * rng.range(0.35, 0.65);
+    const l = w * rng.range(1.1, 1.9);
+    const t = rng.range(0, Math.PI);
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    // A leaf: a long quad, tipped a few degrees so a whole patch is not one
+    // perfectly level plane. The tip only ever goes UP — a downward corner puts
+    // that end of the leaf under the ground, which is the whole reason the
+    // lowest point of this geometry has to clear the sink.
+    const tip = rng.range(0, 0.05);
+    b.addQuadFacing(
+      new THREE.Vector3(cx - cos * l - sin * w, y, cz - sin * l + cos * w),
+      new THREE.Vector3(cx + cos * l - sin * w, y + tip, cz + sin * l + cos * w),
+      new THREE.Vector3(cx + cos * l + sin * w, y + tip, cz + sin * l - cos * w),
+      new THREE.Vector3(cx - cos * l + sin * w, y, cz - sin * l - cos * w),
+      shade(F.litter, rng.range(-0.1, 0.1))
+    );
+  }
+  // One twig, always. It is the thing that says "floor" rather than "carpet".
+  {
+    const a = rng.range(0, Math.PI * 2);
+    const len = spread * rng.range(1.4, 2.4);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const w = spread * 0.06;
+    b.addQuadFacing(
+      new THREE.Vector3(-cos * len - sin * w, 0.13, -sin * len + cos * w),
+      new THREE.Vector3(cos * len - sin * w, 0.16, sin * len + cos * w),
+      new THREE.Vector3(cos * len + sin * w, 0.16, sin * len - cos * w),
+      new THREE.Vector3(-cos * len + sin * w, 0.13, -sin * len - cos * w),
+      shade(F.trunk, rng.range(-0.04, 0.06))
+    );
+  }
+  return { geometry: b.build(), collider: null, tag: 'litter', height: 0.2 };
+}
+
 /** A felled log — reads as "someone worked here", which the empty world needs. */
 export function createLog(theme, rng, scaleHint = 1) {
   const b = new GeomBuilder();
@@ -542,6 +688,9 @@ export const PROP_FACTORIES = {
   dead: createDeadTree,
   rock: createRock,
   bush: createBush,
+  fern: createFern,
+  undergrowth: createUndergrowth,
+  litter: createLitter,
   grass: createGrassTuft,
   log: createLog,
   post: createMarkerPost,

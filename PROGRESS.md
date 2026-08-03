@@ -107,6 +107,11 @@ how to tune it and where to build the next act.
   ground cover shares the same field, so grass does not grow on a path.
   `world/trails.js`, `OPEN_WORLD.trails`, `GROUND_PAINT.trail`.
 
+- **P20** — Understorey. `fern`, `undergrowth` and `litter` prop factories,
+  scattered through the existing `Scatter` but gated by `World#_treeProximity`
+  so they only grow within `OPEN_WORLD.understoreyRadius` of a trunk that is
+  already standing. No colliders. +45k triangles, build 246ms → 275ms.
+
 ## Bugs found so far (do not reintroduce)
 
 1. **Stability assist bypassed the grip ceiling.** It was applied after the yaw

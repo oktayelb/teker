@@ -1670,6 +1670,171 @@ section('12. somebody was here first');
   }
 }
 
+// ---------------------------------------------------------------------------
+section('13. there is something growing under the trees');
+
+// Ferns, undergrowth and leaf litter go through the same `Scatter` as the
+// forest, so what is worth checking is the part that is NOT shared: that they
+// land in the tree stands rather than evenly across the map, that none of them
+// is solid, and that the litter is not floating.
+{
+  const { OPEN_WORLD } = await import('../src/config/gameplay.js');
+  const { SCATTER_RULES } = await import('../src/world/scatter.js');
+  const { buildVariants } = await import('../src/world/props.js');
+  const D = OPEN_WORLD.scatterDensity;
+  const terrain = world.terrain;
+
+  /** Every placed instance of a scatter kind, as world positions. */
+  const positionsOf = (kind) => {
+    const out = [];
+    const m = new THREE.Matrix4();
+    for (const mesh of world.scatter._meshes) {
+      if (!mesh.name.startsWith(`scatter:${kind}:`)) continue;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m);
+        out.push({ x: m.elements[12], y: m.elements[13], z: m.elements[14] });
+      }
+    }
+    return out;
+  };
+
+  const ferns = positionsOf('fern');
+  const under = positionsOf('undergrowth');
+  const litter = positionsOf('litter');
+  const pines = positionsOf('pine');
+
+  ok('ferns were planted', ferns.length > D.ferns * 0.4, `${ferns.length} of ${D.ferns} attempted`);
+  ok('undergrowth was planted', under.length > D.undergrowth * 0.4, `${under.length} of ${D.undergrowth}`);
+  ok('leaf litter was scattered', litter.length > D.litter * 0.4, `${litter.length} of ${D.litter}`);
+
+  // CLUSTERED AROUND THE TREE STANDS. The mechanism is that the understorey
+  // samples the pines' own clumping noise at the pines' own frequency, so they
+  // clump in the same places — nothing looks up where a tree is. Measure it:
+  // an understorey plant should be markedly nearer a pine than a fair coin
+  // toss on the same ground would put it.
+  const nearestPine = (p) => {
+    let best = Infinity;
+    for (let i = 0; i < pines.length; i++) {
+      const d = (pines[i].x - p.x) ** 2 + (pines[i].z - p.z) ** 2;
+      if (d < best) best = d;
+    }
+    return Math.sqrt(best);
+  };
+  const median = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const sample = (arr, n) => {
+    const out = [];
+    const stride = Math.max(1, Math.floor(arr.length / n));
+    for (let i = 0; i < arr.length && out.length < n; i += stride) out.push(arr[i]);
+    return out;
+  };
+
+  // The control: points spread over the same disc the ferns were offered.
+  const control = [];
+  for (let i = 0; control.length < 250 && i < 4000; i++) {
+    const a = i * 2.399963229728653;
+    const r = terrain.halfSpan * 0.95 * Math.sqrt((i % 997) / 997);
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    if (terrain.contains(x, z)) control.push({ x, z });
+  }
+  const fernNear = median(sample(ferns, 250).map(nearestPine));
+  const anyNear = median(control.map(nearestPine));
+  ok(
+    'the understorey grows where the trees are',
+    fernNear < anyNear * 0.7,
+    `median fern-to-pine ${fernNear.toFixed(1)}m vs ${anyNear.toFixed(1)}m for open ground`
+  );
+  ok(
+    '…and so does the litter',
+    median(sample(litter, 250).map(nearestPine)) < anyNear * 0.7,
+    `${median(sample(litter, 250).map(nearestPine)).toFixed(1)}m`
+  );
+
+  // The hard version of the same claim: NOTHING is out on its own. Measured
+  // against every trunk the predicate was built from, not just the pines.
+  {
+    const trunks = world.scatter.colliders.filter(
+      (c) => c.kind === 'pine' || c.kind === 'broadleaf'
+    );
+    const nearestTrunk = (p) => {
+      let best = Infinity;
+      for (let i = 0; i < trunks.length; i++) {
+        const d = (trunks[i].x - p.x) ** 2 + (trunks[i].z - p.z) ** 2;
+        if (d < best) best = d;
+      }
+      return Math.sqrt(best);
+    };
+    let stray = 0;
+    let worst = 0;
+    for (const p of [...sample(ferns, 200), ...sample(under, 200), ...sample(litter, 200)]) {
+      const d = nearestTrunk(p);
+      worst = Math.max(worst, d);
+      if (d > OPEN_WORLD.understoreyRadius + 0.001) stray++;
+    }
+    ok(
+      'no understorey plant grows out in the open',
+      stray === 0,
+      `furthest from a trunk ${worst.toFixed(2)}m, limit ${OPEN_WORLD.understoreyRadius}m`
+    );
+  }
+
+  // You drive through undergrowth. None of it may be solid, and none of it may
+  // end up in the collision grid or in the fellable set.
+  const solid = world.scatter.colliders.filter((c) =>
+    ['fern', 'undergrowth', 'litter'].includes(c.kind)
+  );
+  ok('you can drive straight through all of it', solid.length === 0, `${solid.length} colliders`);
+
+  // Off the racing surface, same rule as the forest.
+  let onRoad = 0;
+  const scratch = {};
+  for (const p of [...sample(ferns, 200), ...sample(litter, 200), ...sample(under, 200)]) {
+    for (const tk of world._trackList) {
+      const q = tk.query(p.x, p.z, scratch);
+      if (q && q.dist < q.halfWidth) onRoad++;
+    }
+  }
+  ok('none of it grows on the road', onRoad === 0, `${onRoad} on tarmac`);
+
+  // LITTER MUST NOT FLOAT, AND MUST NOT SINK. `Scatter` drops every prop 8cm
+  // and never tilts it to the ground, so the geometry has to start above that
+  // by itself — and by little enough that it still reads as lying down.
+  {
+    const variants = buildVariants('litter', theme, 1234, SCATTER_RULES.litter.variants);
+    let lowest = Infinity;
+    let highest = -Infinity;
+    for (const v of variants) {
+      v.geometry.computeBoundingBox();
+      lowest = Math.min(lowest, v.geometry.boundingBox.min.y);
+      highest = Math.max(highest, v.geometry.boundingBox.max.y);
+    }
+    const sink = 0.08;
+    ok(
+      'leaf litter clears the prop sink',
+      lowest * SCATTER_RULES.litter.scale[0] > sink,
+      `lowest piece ${(lowest * SCATTER_RULES.litter.scale[0]).toFixed(3)}m vs ${sink}m sink`
+    );
+    ok(
+      '…and is still lying on the floor',
+      highest * SCATTER_RULES.litter.scale[1] - sink < 0.35,
+      `highest piece ${(highest * SCATTER_RULES.litter.scale[1] - sink).toFixed(3)}m above ground`
+    );
+  }
+
+  // Colours come from the theme. Every theme has to have somewhere to get them.
+  for (const name of Object.keys(THEMES)) {
+    const f = resolveTheme(name).foliage;
+    ok(`theme "${name}" has an understorey palette`,
+      typeof f.fern === 'number' && typeof f.litter === 'number',
+      `fern ${f.fern?.toString(16)} litter ${f.litter?.toString(16)}`);
+  }
+  // …and the night one has to be its OWN, not forest's inherited daylight green.
+  const dayFern = resolveTheme('forest').foliage.fern;
+  const nightFern = resolveTheme('night').foliage.fern;
+  ok('the night forest floor is not lit like the day one', dayFern !== nightFern,
+    `${dayFern.toString(16)} vs ${nightFern.toString(16)}`);
+}
+
 function pointLineDistance(p, a, b) {
   const dx = b.x - a.x;
   const dz = b.z - a.z;
