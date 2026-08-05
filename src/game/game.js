@@ -31,6 +31,7 @@ import { events } from '../core/events.js';
 import { audio } from '../audio/audio.js';
 import { ui } from '../ui/index.js';
 import { LevelHost } from './levels.js';
+import { levelProgress, levelMenuItems } from './levelProgress.js';
 import { FIRST_LEVEL } from '../levels/index.js';
 import { MODE_RIGS } from '../config/camera.js';
 import { PLAYER } from '../config/gameplay.js';
@@ -80,6 +81,15 @@ export class Game {
 
     /** Set by modes; the intro reads it to know where it is. */
     this.flags = { escaped: false, chaseOver: false, racesCompleted: 0 };
+
+    /**
+     * True while something outside is sequencing levels — in practice the
+     * intro director, though this class does not know that and must not.
+     * Maintained purely from bus traffic that only exists while a story is
+     * being staged; delete `src/game/intro/` and it is simply never true.
+     * Read by level select, which hands over rather than jumping the queue.
+     */
+    this._storyActive = false;
 
     this._boundResize = () => this._onResize();
     this._debugPanel = null;
@@ -171,6 +181,20 @@ export class Game {
     // rebuild it exactly.
     events.on('mode:entered', ({ params }) => {
       this._lastModeParams = params;
+    });
+
+    // Crossing a finish line is the only thing that opens the next bölüm. The
+    // race does not know progress exists; it says a race was finished and this
+    // writes it down. See `src/game/levelProgress.js`.
+    events.on('race:finished', (r) => levelProgress.complete(r?.levelId));
+
+    // Whether a story is being staged over the top of the game. Both channels
+    // belong to a director that this file never imports — see `_storyActive`.
+    events.on('intro:phase', () => {
+      this._storyActive = true;
+    });
+    events.on('intro:finished', () => {
+      this._storyActive = false;
     });
 
     this.loop.onUpdate = (dt) => this._update(dt);
@@ -562,6 +586,16 @@ export class Game {
           continue; // back to the pause menu
         }
 
+        if (choice === 'levels') {
+          const picked = await this.ui.screens.showLevelSelect({
+            items: levelMenuItems({ currentId: this.levels.currentId }),
+          });
+          if (!picked) continue; // backed out — the pause menu again
+          this.loop.setPaused(false);
+          await this.startLevel(picked);
+          break;
+        }
+
         if (choice === 'restart' && this.modes.currentName) {
           const name = this.modes.currentName;
           this.loop.setPaused(false);
@@ -582,6 +616,33 @@ export class Game {
       this.audio.setDucking(0);
       this._pausing = false;
     }
+  }
+
+  /**
+   * Race a level, from wherever the player is now. BÖLÜMLER, in one method.
+   *
+   * NOTHING IS LOCKED. Any level can be asked for at any time — the lock in the
+   * menu is a note about progress, not a door (see `src/game/levelProgress.js`).
+   * That is what makes the tenth map reachable without driving the nine before
+   * it, which is mostly how it gets tested.
+   *
+   * While a story is being staged the switch is not ours to make: the director
+   * has an order it is walking, and dropping a race into the middle of it from
+   * here would leave it waiting on a finish that never comes. So we say what
+   * was asked for and let it place the level. Nothing is listening once the
+   * story is over — or if there was never one — and then this is a mode switch
+   * like any other.
+   *
+   * @param {string} levelId
+   */
+  async startLevel(levelId) {
+    if (!levelId) return this;
+    if (this._storyActive) {
+      events.emit('game:levelSelected', { levelId });
+      return this;
+    }
+    await this.modes.switchTo('race', { levelId });
+    return this;
   }
 
   // -- settings -------------------------------------------------------------

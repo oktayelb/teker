@@ -2657,6 +2657,80 @@ section('17. every level is drivable, and the ones in the air hold you up');
   w.dispose();
 }
 
+// ---------------------------------------------------------------------------
+section('18. bölümler — what the menu knows about progress');
+
+// The list behind BÖLÜMLER is derived from one stored fact: which levels have
+// been finished. What is asserted here is that the derivation is the rule the
+// menu draws (a level opens when the one before it is done), that it survives
+// the page, and — the load-bearing one — that NOTHING here refuses to hand out
+// a level. The lock is a note, not a door; the tenth map has to be reachable
+// without driving the nine in front of it.
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+
+  const mod = await import('../src/game/levelProgress.js?instance=write');
+  const { levelProgress, levelMenuItems } = mod;
+  levelProgress.reset();
+
+  ok('bölüm 1 is open from the start', levelProgress.isUnlocked(LEVELS[0].id));
+  ok('…and bölüm 2 is not', !levelProgress.isUnlocked(LEVELS[1].id));
+  ok('…and nothing is finished yet', !levelProgress.isCompleted(LEVELS[0].id));
+
+  levelProgress.complete(LEVELS[0].id);
+  ok('finishing one opens the next', levelProgress.isUnlocked(LEVELS[1].id));
+  ok('…and only the next', !levelProgress.isUnlocked(LEVELS[2].id));
+  ok('…and completing it twice is a no-op', levelProgress.complete(LEVELS[0].id) === false);
+  ok('an id that is not a level is refused', levelProgress.complete('level999') === false);
+
+  const items = levelMenuItems({ currentId: LEVELS[1].id });
+  ok('the menu lists every level, in order', items.length === LEVELS.length &&
+    items.every((it, i) => it.id === LEVELS[i].id && it.index === i + 1));
+  ok('…marks the finished one', items[0].done && !items[0].locked);
+  ok('…marks where the player is', items[1].current && !items[1].locked);
+  ok('…and draws the rest as locked', items.slice(2).every((it) => it.locked && !it.done),
+    `${items.filter((it) => it.locked).length} locked`);
+  ok('…but every row still names a real level anyone can ask for',
+    items.every((it) => !!levelById(it.id)));
+
+  ok('it reached localStorage', store.size === 1);
+  const reread = (await import('../src/game/levelProgress.js?instance=read')).levelProgress;
+  ok('a fresh page finds the progress again', reread.isUnlocked(LEVELS[1].id));
+
+  // Storage that is not there at all — private mode, a file:// boot, this test
+  // a moment from now. Progress becomes per-session; nothing throws.
+  delete globalThis.localStorage;
+  const offline = (await import('../src/game/levelProgress.js?instance=offline')).levelProgress;
+  ok('without storage the game still starts on bölüm 1', offline.isUnlocked(LEVELS[0].id));
+  ok('…and still records a finish for this session',
+    offline.complete(LEVELS[0].id) === true && offline.isUnlocked(LEVELS[1].id));
+}
+
+// The two menus that reach it. Neither is worth a browser: what breaks in
+// practice is an id going out of sync between the screen that offers it and the
+// code that acts on it, which is a text-level fact about these three files.
+{
+  const screens = readFileSync('src/ui/screens.js', 'utf8');
+  const game = readFileSync('src/game/game.js', 'utf8');
+  const director = readFileSync('src/game/intro/introDirector.js', 'utf8');
+
+  ok('the pause menu offers BÖLÜMLER', /id: 'levels', label: 'BÖLÜMLER'/.test(screens));
+  ok('…and the game acts on that id', /choice === 'levels'/.test(game));
+  ok('the title menu offers it too', /id: 'levels', label: 'BÖLÜMLER'/.test(director));
+  ok('…and the screen it opens exists', /showLevelSelect\(/.test(screens));
+  ok('level select is what BÖLÜM N’TEN BAŞLA used to be',
+    !/BÖLÜM \$\{[^}]+\}’TEN BAŞLA/.test(director));
+  ok('a chosen level goes through one door', /async startLevel\(levelId\)/.test(game));
+  ok('…which hands over to a story rather than jumping its queue',
+    /game:levelSelected/.test(game) && /game:levelSelected/.test(director));
+}
+
 function pointLineDistance(p, a, b) {
   const dx = b.x - a.x;
   const dz = b.z - a.z;

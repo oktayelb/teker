@@ -45,6 +45,7 @@ const PAUSE_ITEMS = [
   { id: 'resume', label: 'DEVAM ET' },
   { id: 'settings', label: 'AYARLAR' },
   { id: 'restart', label: 'YENİDEN BAŞLA' },
+  { id: 'levels', label: 'BÖLÜMLER' },
   { id: 'mainMenu', label: 'ANA MENÜ' },
 ];
 
@@ -142,6 +143,20 @@ export class Screens {
     pauseCard.append(this._pauseMenu);
     this._pause.append(pauseCard);
 
+    // -- level select -------------------------------------------------------
+    // Rows are built per call (`showLevelSelect`), because unlike the two menus
+    // above the list carries state — done, locked, where you are — and that
+    // changes between two openings of the same screen.
+    this._levels = el('div', 'tk-screen tk-screen-dim');
+    const levelCard = el('div', 'tk-levels tk-panel');
+    this._levelsTitle = el('h2', null, 'BÖLÜMLER');
+    this._levelsList = el('nav', 'tk-levels-list');
+    // Separators, not runs of spaces: HTML collapses those, and the hint reads
+    // as one word without them.
+    this._levelsHint = el('div', 'tk-results-hint tk-txt', 'ENTER · SEÇ — ESC · GERİ');
+    levelCard.append(this._levelsTitle, this._levelsList, this._levelsHint);
+    this._levels.append(levelCard);
+
     // -- loading ------------------------------------------------------------
     this._loading = el('div', 'tk-screen tk-screen-solid');
     this._loadingText = el('div', 'tk-loading-text tk-txt', 'LOADING');
@@ -176,6 +191,7 @@ export class Screens {
       this._countdown,
       this._results,
       this._pause,
+      this._levels,
       this._loading,
       this._alert,
       this._sysmsg,
@@ -338,6 +354,119 @@ export class Screens {
     const items = Array.isArray(opts.items) && opts.items.length ? opts.items : PAUSE_ITEMS;
     return new Promise((resolve) => {
       this._openMenu(this._pause, this._pauseMenu, items, 'pause', resolve, 'resume');
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // LEVEL SELECT
+  // -------------------------------------------------------------------------
+
+  /**
+   * BÖLÜMLER. The whole list, always — a locked level is drawn darker and
+   * labelled, but it is still a row you can press. Whether a lock means
+   * anything is the game's business, and the game has decided it does not (see
+   * `src/game/levelProgress.js`).
+   *
+   * @param {object} [opts]
+   * @param {{id:string,index:number,name:string,subtitle?:string,
+   *          locked?:boolean,done?:boolean,current?:boolean}[]} opts.items
+   * @param {string} [opts.title]
+   * @returns {Promise<string|null>} the chosen level id, or null for "back"
+   */
+  showLevelSelect(opts = {}) {
+    if (!this.el) return Promise.resolve(null);
+    const items = Array.isArray(opts.items) ? opts.items : [];
+    if (!items.length) return Promise.resolve(null);
+    this._levelsTitle.textContent = String(opts.title || 'BÖLÜMLER');
+
+    this._levelsList.textContent = '';
+    const buttons = items.map((item) => {
+      const btn = el('button', 'tk-btn tk-level');
+      btn.type = 'button';
+      btn.dataset.id = String(item.id);
+      btn.classList.toggle('is-locked', !!item.locked);
+      btn.classList.toggle('is-done', !!item.done);
+      btn.classList.toggle('is-current', !!item.current);
+      btn.append(
+        el('span', 'tk-level-no tk-num', String(item.index ?? '').padStart(2, '0')),
+        el('span', 'tk-level-name', String(item.name || item.id).toUpperCase()),
+        el('span', 'tk-level-sub tk-txt', String(item.subtitle || '')),
+        // One word for where this level stands. "BURADA" outranks everything —
+        // being told a level is locked while standing on it is a worse answer
+        // than the true one, and the row is drawn dim either way.
+        el(
+          'span',
+          'tk-level-state tk-txt',
+          item.current ? 'BURADA' : item.done ? 'BİTTİ' : item.locked ? 'KİLİTLİ' : 'AÇIK'
+        )
+      );
+      this._levelsList.append(btn);
+      return btn;
+    });
+
+    // Open on where the player is, or on the first level they have not done.
+    let index = items.findIndex((i) => i.current);
+    if (index < 0) index = items.findIndex((i) => !i.done && !i.locked);
+    if (index < 0) index = 0;
+
+    const paint = () => {
+      for (let i = 0; i < buttons.length; i++) {
+        buttons[i].classList.toggle('is-active', i === index);
+      }
+      // The list scrolls once there are more levels than fit; keep the cursor
+      // where the eye is rather than where the scrollbar was left.
+      buttons[index]?.scrollIntoView?.({ block: 'nearest' });
+    };
+
+    return new Promise((resolve) => {
+      const finish = (id) => {
+        for (const b of buttons) {
+          b.onclick = null;
+          b.onmouseenter = null;
+        }
+        popLayer();
+        this._close(this._levels);
+        this._pending.delete('levels');
+        resolve(id);
+      };
+
+      buttons.forEach((btn, i) => {
+        btn.onmouseenter = () => {
+          index = i;
+          paint();
+        };
+        btn.onclick = () => finish(btn.dataset.id);
+      });
+
+      const popLayer = this._pushLayer((e) => {
+        switch (e.key) {
+          case 'ArrowUp':
+          case 'w':
+          case 'W':
+            index = (index - 1 + buttons.length) % buttons.length;
+            paint();
+            return true;
+          case 'ArrowDown':
+          case 's':
+          case 'S':
+            index = (index + 1) % buttons.length;
+            paint();
+            return true;
+          case 'Enter':
+          case ' ':
+            finish(buttons[index].dataset.id);
+            return true;
+          case 'Escape':
+            finish(null);
+            return true;
+          default:
+            return false;
+        }
+      });
+
+      this._pending.set('levels', () => finish(null));
+      paint();
+      this._open(this._levels);
     });
   }
 
@@ -569,7 +698,14 @@ export class Screens {
     this._stack.length = 0;
     this._typer = null;
     if (!this.el) return;
-    for (const node of [this._title, this._countdown, this._results, this._pause, this._loading]) {
+    for (const node of [
+      this._title,
+      this._countdown,
+      this._results,
+      this._pause,
+      this._levels,
+      this._loading,
+    ]) {
       this._close(node);
     }
     this._alert.classList.remove('is-open');

@@ -834,6 +834,95 @@ body {
   .tk-results-hint { animation: none; opacity: 0.6; }
 }
 
+/* -- level select ---------------------------------------------------------- */
+
+.tk-levels {
+  min-width: clamp(280px, 56vmin, 620px);
+  max-width: min(92vw, 720px);
+}
+
+.tk-levels h2 {
+  margin: 0 0 0.8em;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-align: center;
+}
+
+.tk-levels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Ten levels fit; the eleventh scrolls rather than pushing the panel off the
+     screen. The cursor is kept in view from JS (`scrollIntoView`). */
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+/* A row is a button with columns: caret, number, name, English name, state.
+   The caret is `.tk-btn::before`, which is a child of this grid like any
+   other — so the arrow the rest of the menus use lands in a column of its
+   own instead of shoving the numbers sideways when it appears. */
+.tk-level {
+  display: grid;
+  grid-template-columns: 1.2em 2.4em minmax(0, 1fr) minmax(0, auto) 5.5em;
+  align-items: baseline;
+  gap: 0.7em;
+  padding: 0.4em 0.8em;
+  letter-spacing: 0.1em;
+  font-size: var(--fs-md);
+}
+
+.tk-level-no {
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+.tk-level-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tk-level-sub {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.16em;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tk-level-state {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.18em;
+  color: var(--ink-dim);
+  text-align: right;
+}
+
+.tk-level.is-done .tk-level-state { color: var(--good); }
+.tk-level.is-current .tk-level-state { color: var(--accent); }
+
+/* Locked reads as unlit rather than as disabled: the row still takes the
+   cursor and still starts the level (nothing here gates anything) — it is
+   simply darker, which is the whole signal. */
+.tk-level.is-locked {
+  color: rgba(var(--ink-rgb), 0.34);
+  opacity: 0.55;
+}
+
+.tk-level.is-locked .tk-level-no { color: rgba(var(--accent-rgb), 0.4); }
+
+.tk-level.is-locked.is-active,
+.tk-level.is-locked:hover {
+  /* Still visibly the dim one, but bright enough to read while it is under
+     the cursor. */
+  color: rgba(var(--ink-rgb), 0.62);
+  opacity: 0.85;
+}
+
 /* -- alert ----------------------------------------------------------------- */
 
 .tk-alert {

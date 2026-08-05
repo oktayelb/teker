@@ -36,7 +36,8 @@ import { RaceMode } from '../modes/raceMode.js';
 import { OpenWorldMode } from '../modes/openWorldMode.js';
 import { BEATS, INTRO_TIMING as T, getBeat } from './beats.js';
 import { BREAKOUT, OPEN_WORLD, RACE } from '../../config/gameplay.js';
-import { LEVELS, FREE_ROAM_LEVEL, resolveLevel } from '../../levels/index.js';
+import { LEVELS, FREE_ROAM_LEVEL, resolveLevel, nextLevel } from '../../levels/index.js';
+import { levelMenuItems } from '../levelProgress.js';
 import { clamp01, lerp } from '../../core/mathx.js';
 
 /**
@@ -72,6 +73,8 @@ export class IntroDirector {
     this._domeShotRunning = false;
     /** Set to a title-menu id to skip the menu entirely (see `?start=`). */
     this.startAt = null;
+    /** A level the player picked from BÖLÜMLER mid-race; see `_onLevelSelected`. */
+    this._jumpTo = null;
   }
 
   // -- lifecycle ------------------------------------------------------------
@@ -89,6 +92,10 @@ export class IntroDirector {
       .on('race:finished', () => this.game.flags.racesCompleted++)
       .on('race:dismissed', (p) => this._onRaceDismissed(p))
       .on('race:offCourse', (p) => this._onOffCourse(p))
+      // BÖLÜMLER, from the pause menu. The game does not switch the level
+      // itself while a story is being staged — it says which one was asked
+      // for and lets whoever is sequencing races put it in the right place.
+      .on('game:levelSelected', (p) => this._onLevelSelected(p))
       .on('chase:escaped', () => this._onChaseEscaped())
       .on('chase:lost', () => this._onChaseLost())
       // The world reveals its own domes; the director only stages the shot.
@@ -150,23 +157,28 @@ export class IntroDirector {
     showcase.reset(slot.position, slot.heading);
     g.camera.setTarget(showcase);
 
-    // The stage that breaks, named for the menu. `?start=` and the menu item
-    // below both use its id, so neither has a number written into it.
-    const breaking = LEVELS.find((l) => l.story?.breaks) || LEVELS[LEVELS.length - 1];
-
     // Pass the menu explicitly rather than relying on the UI's defaults — the
     // ids below are the director's contract with the title screen.
+    //
+    // BÖLÜMLER resolves to a level id, which is the same thing `?start=` hands
+    // over: "race this one, then everything after it". Backing out of the list
+    // simply asks the title again, which is why this is a loop.
     let action = this.startAt;
-    if (!action) {
+    while (!action) {
       this._play('title.tagline');
-      action = await g.ui.screens.showTitle({
+      const choice = await g.ui.screens.showTitle({
         tagline: `${LEVELS.length} parkur · Orman devresi`,
         items: [
           { id: 'start', label: 'BAŞLA' },
-          { id: breaking.id, label: `BÖLÜM ${breaking.index}’TEN BAŞLA` },
+          { id: 'levels', label: 'BÖLÜMLER' },
           { id: 'freeRoam', label: 'SERBEST SÜRÜŞ' },
         ],
       });
+      if (choice === 'levels') {
+        action = await g.ui.screens.showLevelSelect({ items: levelMenuItems() });
+      } else {
+        action = choice;
+      }
     }
 
     if (action === 'skip' || action === 'freeRoam') {
@@ -179,12 +191,16 @@ export class IntroDirector {
     // "skip the warm-up races and keep everything downstream" — the blackout,
     // the breakout, the sirens and the chase are unchanged.
     const from = action === 'start' ? null : resolveLevel(action) || resolveLevel(String(action).replace(/^race/, ''));
-    const queue = from ? LEVELS.slice(LEVELS.indexOf(from)) : LEVELS;
+    let level = from || LEVELS[0];
     if (from) g.flags.racesCompleted = LEVELS.indexOf(from);
 
-    for (let i = 0; i < queue.length; i++) {
-      const level = queue[i];
-      const last = level.story?.breaks || i === queue.length - 1;
+    // Not a for-loop over a fixed queue: BÖLÜMLER can redirect the running
+    // order at any point (see `_onLevelSelected`), and "which level is next"
+    // has to be a question asked after each race rather than a list decided
+    // before the first one.
+    for (;;) {
+      const after = nextLevel(level.id);
+      const last = level.story?.breaks || !after;
       await this._runRace(level, {
         // A race on the map that is ALREADY standing does not fade: the title
         // screen is parked on that very grid, so cutting to it reads as the
@@ -193,10 +209,47 @@ export class IntroDirector {
         fade: level.id !== g.levels.currentId,
         nextLabel: last ? undefined : 'SONRAKİ YARIŞ',
       });
+      // A level picked from the pause menu outranks both the break and the
+      // running order — the player asked to be somewhere else.
+      if (this._jumpTo) {
+        level = this._jumpTo;
+        this._jumpTo = null;
+        continue;
+      }
       // A level that breaks never resolves: `_onOffCourse` takes the story
       // from here, and nothing after this loop runs.
-      if (level.story?.breaks) return;
+      if (level.story?.breaks || !after) return;
+      level = after;
     }
+  }
+
+  /**
+   * BÖLÜMLER while a race is on. Two cases, and the difference is whether there
+   * is still a queue to redirect:
+   *
+   *   during a race → drop the level that is running and take the new one as
+   *     the next in the running order, so everything downstream (the break, the
+   *     sirens, the chase) still happens — exactly like `?start=`.
+   *   after the races → there is nothing left to sequence, so stop directing
+   *     and hand the player over to the level they asked for. Detaching emits
+   *     `intro:finished`, which is what tells the game to stop routing level
+   *     select through here at all.
+   */
+  async _onLevelSelected(p) {
+    const level = resolveLevel(p?.levelId);
+    if (!level || !this.attached) return;
+
+    if (this.phase === 'race') {
+      this._jumpTo = level;
+      this.game.flags.racesCompleted = LEVELS.indexOf(level);
+      // Unblock `_runRace`, which is sitting on `race:dismissed` for a race
+      // that is not going to finish.
+      this._onRaceDismissed({ jumped: true, levelId: level.id });
+      return;
+    }
+
+    this.detach();
+    await this.game.modes.switchTo('race', { levelId: level.id });
   }
 
   /**
@@ -251,6 +304,9 @@ export class IntroDirector {
     await new Promise((resolve) => {
       this._raceResolved = resolve;
     });
+    // Nothing closes a race the player walked out of: the line about how that
+    // one went belongs to a race that was actually finished.
+    if (this._jumpTo) return;
     this._play(this._beat(level, 'post'));
     await this._wait(T.betweenRaces);
   }
