@@ -16,6 +16,10 @@
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
 
+// Whichever level says it ends the game. Not written down twice.
+const { LEVELS } = await import('../src/levels/index.js');
+const BREAKS = (LEVELS.find((l) => l.story?.breaks) || LEVELS.at(-1)).id;
+
 const PORT = 8241;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -40,7 +44,7 @@ try {
     failures++;
     console.log('[PAGEERROR]', e.message);
   });
-  await page.goto(`http://localhost:${PORT}/index.html?start=race3`, { waitUntil: 'load' });
+  await page.goto(`http://localhost:${PORT}/index.html?start=${BREAKS}`, { waitUntil: 'load' });
   await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   await page.evaluate(() => {
     // Game seconds, not wall clock: the clocks under test accumulate `dt`, and
@@ -99,13 +103,34 @@ try {
   );
 
   // -- 2. now actually leave ------------------------------------------------
-  // Straight out into the trees rather than 70m to the side: parkur 3 loops, so
-  // a point beside one section can sit within 20m of another and legitimately
-  // reset the clock. Out here there is no ribbon to be near.
+  // Straight out into the trees rather than 70m to the side: a parkour loops,
+  // so a point beside one section can sit within 20m of another and
+  // legitimately reset the clock.
+  //
+  // OUTWARD FROM THE MIDDLE OF THE LOOP, not "+500 on both axes". A fixed
+  // offset is only far away on a track shaped like the one it was written for:
+  // on a five-hundred-metre loop it lands neatly on the far side of the same
+  // ribbon, the query answers, and the escape becomes the six-second stranded
+  // path instead of the distance one.
   console.log('\n— leaving: off into the world —');
   await page.evaluate(() => {
     const v = TEKER.game.player;
-    window.__far = { x: v.position.x + 500, y: v.position.y + 4, z: v.position.z + 500 };
+    const t = TEKER.game.world.mainTrack;
+    let cx = 0;
+    let cz = 0;
+    let reach = 0;
+    for (let i = 0; i < t.count; i++) {
+      cx += t.px[i] / t.count;
+      cz += t.pz[i] / t.count;
+    }
+    for (let i = 0; i < t.count; i++) {
+      reach = Math.max(reach, Math.hypot(t.px[i] - cx, t.pz[i] - cz));
+    }
+    const dx = v.position.x - cx;
+    const dz = v.position.z - cz;
+    const len = Math.hypot(dx, dz) || 1;
+    const out = reach + 260;
+    window.__far = { x: cx + (dx / len) * out, y: v.position.y + 4, z: cz + (dz / len) * out };
   });
   const t0 = await page.evaluate(() => {
     const v = TEKER.game.player;
@@ -126,10 +151,14 @@ try {
   check('the break does fire once genuinely out of bounds', delay != null);
   check('…and waits out the hold instead of firing instantly', delay != null && delay > 1.3,
     `${delay?.toFixed(2)}s game time vs escapeHoldSeconds 1.6`);
-  // Loose upper bound: under swiftshader the fixed-step accumulator falls behind
-  // `game.time`, so the clock under test advances slower than the wall the delay
-  // is measured against. On real hardware this lands near escapeHoldSeconds.
-  check('…without dragging', delay != null && delay < 6, `${delay?.toFixed(2)}s`);
+  // Loose upper bound, and it has to be loose. The clock under test accumulates
+  // physics `dt`; the delay is measured against `game.time`, which is wall
+  // clock. Under swiftshader the loop caps at six sub-steps a frame, so on a
+  // heavy map (rain, five thousand trees) the simulation advances about a third
+  // of real time and 1.6s of hold reads as five or six. What this is guarding
+  // against is the break arriving tens of seconds late, or via the stranded
+  // path — not the frame rate of a software renderer.
+  check('…without dragging', delay != null && delay < 9, `${delay?.toFixed(2)}s`);
 
   await sleep(2500);
 } finally {

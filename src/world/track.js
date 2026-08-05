@@ -55,6 +55,26 @@ export const ROAD = {
   barrierHeight: 1.05,
   barrierSpacing: 5.5,
   barrierOffset: 1.4,
+
+  // -- viaducts -------------------------------------------------------------
+  // A road that leaves the ground. See `Track#_applyElevated`.
+
+  /** Depth of the deck below the driving surface, metres. */
+  deckThickness: 1.6,
+  /** Parapet wall along an elevated edge: height and thickness, metres. */
+  parapetHeight: 0.9,
+  parapetThickness: 0.45,
+  /** Metres between support pillars. */
+  pillarSpacing: 34,
+  /** Pillar half-width. They taper: this is the top. */
+  pillarHalfWidth: 1.5,
+  /**
+   * How far the deck's influence fades in at each end of an elevated run, in
+   * SAMPLES. The terrain stops being flattened over this distance rather than
+   * at a line, so a viaduct grows out of an earth abutment instead of ending
+   * in a cliff face. See `Track#_applyElevated`.
+   */
+  deckBlendSamples: 14,
 };
 
 export class Track {
@@ -152,9 +172,11 @@ export class Track {
 
     this._computeFrames();
     this._applyPatches();
+    this._applyElevated();
     this._buildSpatialHash();
     this._buildCheckpoints();
     this._buildBarriers();
+    this._buildParapets();
     this._buildMarkers();
     this._buildLightAnchors();
   }
@@ -178,6 +200,11 @@ export class Track {
     this.surfaces = new Array(count).fill(this.data.defaultSurface || 'TARMAC');
     /** Metres beyond the tarmac that this sample's surface keeps going. */
     this.runoff = new Float32Array(count);
+    /**
+     * 0 = the road is lying on the ground, 1 = it is a deck in the air, and in
+     * between is the abutment where one becomes the other. @see _applyElevated
+     */
+    this.deck = new Float32Array(count);
   }
 
   _resample(dense, spacing) {
@@ -268,6 +295,71 @@ export class Track {
     }
   }
 
+  /**
+   * THE ROAD LEAVES THE GROUND.
+   *
+   * `data.elevated: [{ from, to }]` — lap fractions, same shape as `patches` —
+   * marks the runs the road crosses on a deck instead of on earth. Three things
+   * follow from a sample being elevated, and they are the whole feature:
+   *
+   *   1. THE TERRAIN IS NOT FLATTENED UNDER IT. `shapeTerrain` normally pins
+   *      the ground to the road's own height for twenty-four metres either
+   *      side. Do that to a road forty metres in the air and you do not get a
+   *      viaduct, you get an embankment the size of a hill — and the valley the
+   *      bridge was crossing fills in. So the shaper backs off, and what is
+   *      under the deck is whatever was there before.
+   *   2. IT IS ONLY GROUND FROM ABOVE. See `World#sampleGround`: a car under a
+   *      viaduct is driving on the forest floor, not on the underside of a
+   *      bridge, and a car that runs out of deck falls off the side of it.
+   *   3. IT IS BUILT RATHER THAN GRADED. Deck, parapets, pillars down to
+   *      whatever the ground is doing underneath. See `_buildDeckMesh`.
+   *
+   * `deck` is a 0..1 FIELD rather than a flag, tapered over
+   * `ROAD.deckBlendSamples` at each end, because the two states have to meet
+   * somewhere: at the tapered end the ground is still pulled part of the way up
+   * to the road, which is exactly what an abutment is — earth ramped up to
+   * where the bridge starts.
+   *
+   * A spiral is not a special case here. It is an elevated run whose control
+   * points happen to pass over themselves; what makes it work is `query`
+   * knowing which of two decks you are on, not anything in this method.
+   */
+  _applyElevated() {
+    const runs = this.data.elevated || [];
+    if (runs.length === 0) return;
+    for (const run of runs) {
+      const from = Math.floor(run.from * this.count);
+      const to = Math.ceil(run.to * this.count);
+      for (let k = from; k < to; k++) {
+        const i = this.loop ? ((k % this.count) + this.count) % this.count : clamp(k, 0, this.count - 1);
+        this.deck[i] = 1;
+      }
+    }
+
+    // Taper the ends. Walked as a distance transform out of the solid runs, so
+    // two runs that nearly touch do not carve a notch between them.
+    const blend = Math.max(1, ROAD.deckBlendSamples);
+    const src = this.deck.slice();
+    for (let i = 0; i < this.count; i++) {
+      if (src[i] > 0) continue;
+      let nearest = Infinity;
+      for (let d = 1; d <= blend; d++) {
+        const a = this.loop ? (i - d + this.count) % this.count : Math.max(0, i - d);
+        const b = this.loop ? (i + d) % this.count : Math.min(this.count - 1, i + d);
+        if (src[a] > 0 || src[b] > 0) {
+          nearest = d;
+          break;
+        }
+      }
+      if (nearest <= blend) this.deck[i] = 1 - nearest / (blend + 1);
+    }
+  }
+
+  /** True where the road is a deck rather than a graded cut. */
+  isElevated(i) {
+    return this.deck[i] > 0.5;
+  }
+
   _cellKey(x, z) {
     return `${Math.floor(x / this._cellSize)},${Math.floor(z / this._cellSize)}`;
   }
@@ -349,6 +441,47 @@ export class Track {
   }
 
   /**
+   * The wall along the edge of a deck.
+   *
+   * Not the same thing as `barriers`, and it is not optional in the same way.
+   * Armco is a choice a track makes about how much it is willing to catch you;
+   * a parapet is what stops a bridge being a diving board. Anywhere the road is
+   * genuinely in the air it gets one on both sides, whatever the track said
+   * about barriers — including bölüm 3's "no barriers at all", which is a
+   * statement about a dirt road on a hillside and not permission to build an
+   * unfenced viaduct. `parapet: false` is there for a track that wants the
+   * diving board, and nothing in the game uses it.
+   *
+   * It is low, so it is still possible to be thrown over it, and it is solid,
+   * so you have to be thrown rather than merely wander.
+   */
+  _buildParapets() {
+    if (this.data.parapet === false) return;
+    const step = Math.max(1, Math.round(ROAD.barrierSpacing / ROAD.sampleSpacing));
+    const H = ROAD.parapetHeight;
+    for (let i = 0; i < this.count; i += step) {
+      if (!this.isElevated(i)) continue;
+      for (const side of ['left', 'right']) {
+        const s = side === 'left' ? -1 : 1;
+        const off = this.halfWidth[i] + ROAD.parapetThickness * 0.5 + 0.2;
+        this.colliders.push({
+          type: 'box',
+          x: this.px[i] + this.rx[i] * off * s,
+          y: this.py[i] + H / 2,
+          z: this.pz[i] + this.rz[i] * off * s,
+          halfX: ROAD.parapetThickness * 0.5,
+          halfY: H / 2,
+          halfZ: ROAD.barrierSpacing * 0.55,
+          rotationY: Math.atan2(this.tx[i], this.tz[i]),
+          kind: 'parapet',
+          side,
+          sample: i,
+        });
+      }
+    }
+  }
+
+  /**
    * Plastic delineator posts. These mark where the road is and nothing else —
    * they have no colliders at all. A car goes straight through them, which is
    * the point: on a route defined by posts rather than Armco, the only thing
@@ -419,22 +552,45 @@ export class Track {
 
   /**
    * Nearest point on the track to (x, z).
+   *
+   * `y` is optional and only matters where a road passes over itself — a
+   * spiral, a flyover, a figure of eight. In plan view those are the same
+   * place, and a query that only knows (x, z) has to guess which deck it is
+   * being asked about; guessing wrong teleports a car sixty metres. Given a
+   * height it prefers the deck nearest that height, and a car climbing a
+   * spiral stays on the ramp it is on.
+   *
+   * The penalty is a WEIGHTED tie-break rather than a filter: two metres of
+   * height error is worth `HEIGHT_BIAS` metres of lateral error, so on ordinary
+   * ground (where only one candidate is anywhere near) it changes nothing at
+   * all, and where two decks overlap it decides. Passing no height is still
+   * valid and still means "whatever is nearest in plan" — which is what every
+   * caller that is not a car wants.
+   *
+   * @param {number} [y] height of whoever is asking, if they have one
    * @returns {null | {index:number, dist:number, signedDist:number, height:number,
    *   halfWidth:number, surface:string, progress:number, onRoad:boolean,
-   *   forwardX:number, forwardZ:number}}
+   *   deck:number, forwardX:number, forwardZ:number}}
    */
-  query(x, z, out = {}) {
+  query(x, z, out = {}, y = null) {
     const candidates = this._grid.get(this._cellKey(x, z));
     if (!candidates) return null;
 
     let best = -1;
     let bestDist = Infinity;
+    let bestScore = Infinity;
     let bestT = 0;
     for (let k = 0; k < candidates.length; k++) {
       const i = candidates[k];
       const j = this.loop ? (i + 1) % this.count : Math.min(i + 1, this.count - 1);
       const r = pointSegmentXZ(x, z, this.px[i], this.pz[i], this.px[j], this.pz[j]);
-      if (r.dist < bestDist) {
+      let score = r.dist;
+      if (y != null) {
+        const segY = lerp(this.py[i], this.py[j], r.t);
+        score += Math.abs(y - segY) * HEIGHT_BIAS;
+      }
+      if (score < bestScore) {
+        bestScore = score;
         bestDist = r.dist;
         best = i;
         bestT = r.t;
@@ -459,6 +615,8 @@ export class Track {
     out.runoff = this.runoff[best];
     out.progress = this.length > 0 ? this.arc[best] / this.length : 0;
     out.onRoad = bestDist <= halfWidth;
+    /** 0 on the ground, 1 on a deck in the air. @see _applyElevated */
+    out.deck = lerp(this.deck[best], this.deck[j], bestT);
     out.forwardX = this.tx[best];
     out.forwardZ = this.tz[best];
     return out;
@@ -476,9 +634,11 @@ export class Track {
     // natural ground. See the note on ROAD.flattenCore — the core radius is
     // what keeps the tarmac from being swallowed by the heightfield.
     const core = Math.max(q.halfWidth + ROAD.shoulderWidth, ROAD.flattenCore);
-    if (q.dist <= core) return q.height;
-    const w = 1 - smoothstep(core, ROAD.flattenRadius, q.dist);
-    return lerp(h, q.height, w * w);
+    const w = q.dist <= core ? 1 : (1 - smoothstep(core, ROAD.flattenRadius, q.dist)) ** 2;
+    // …and a deck does not grade the land at all: it stands over it. The
+    // taper in `deck` is what turns the last stretch of graded earth into the
+    // abutment the bridge starts from. @see _applyElevated
+    return lerp(h, q.height, w * (1 - q.deck));
   };
 
   /**
@@ -527,8 +687,11 @@ export class Track {
   /**
    * @param {import('../render/materials.js').MaterialLibrary} materials
    * @param {object} theme resolved theme
+   * @param {import('./terrain.js').Terrain} [terrain] only needed by a track
+   *   with an elevated run in it — a pillar has to reach the ground, and the
+   *   ground is the one thing a track does not otherwise know about.
    */
-  buildMesh(materials, theme) {
+  buildMesh(materials, theme, terrain = null) {
     const group = new THREE.Group();
     group.name = `track:${this.id}`;
 
@@ -558,23 +721,26 @@ export class Track {
       const b1 = this._edge(j, this.halfWidth[j], ROAD.roadLift);
       roadB.addQuadFacing(a0, a1, b1, b0, roadColor);
 
-      // Graded shoulders.
-      const s = ROAD.shoulderWidth;
-      const d = -ROAD.shoulderDrop;
-      roadB.addQuadFacing(
-        this._edge(i, -this.halfWidth[i] - s, d),
-        a0,
-        b0,
-        this._edge(j, -this.halfWidth[j] - s, d),
-        R.shoulder
-      );
-      roadB.addQuadFacing(
-        a1,
-        this._edge(i, this.halfWidth[i] + s, d),
-        this._edge(j, this.halfWidth[j] + s, d),
-        b1,
-        R.shoulder
-      );
+      // Graded shoulders — but only where there is ground to grade. A deck's
+      // edge is a wall and a drop, and it is built in `_buildDeckMesh`.
+      if (this.deck[i] < 0.5) {
+        const s = ROAD.shoulderWidth;
+        const d = -ROAD.shoulderDrop;
+        roadB.addQuadFacing(
+          this._edge(i, -this.halfWidth[i] - s, d),
+          a0,
+          b0,
+          this._edge(j, -this.halfWidth[j] - s, d),
+          R.shoulder
+        );
+        roadB.addQuadFacing(
+          a1,
+          this._edge(i, this.halfWidth[i] + s, d),
+          this._edge(j, this.halfWidth[j] + s, d),
+          b1,
+          R.shoulder
+        );
+      }
 
       // Painted markings. Hoisted out of the conditionals below because the
       // centre dashes need `lw` too, and an unsealed track skips both.
@@ -639,6 +805,8 @@ export class Track {
     group.add(decals);
 
     group.add(this._buildStartLine(materials, theme));
+    const deck = this._buildDeckMesh(materials, theme, terrain);
+    if (deck) group.add(deck);
     const barriers = this._buildBarrierMesh(materials, theme);
     if (barriers) group.add(barriers);
     const markers = this._buildMarkerMesh(materials, theme);
@@ -682,6 +850,118 @@ export class Track {
     const m = new THREE.Mesh(b.build(), materials.get('roadDecal'));
     m.name = 'startLine';
     return m;
+  }
+
+  /**
+   * The bridge itself: what you see from underneath and from the side.
+   *
+   * Three parts, and each one is answering a question the player will ask by
+   * looking at it. The SIDE is why the road does not simply stop at its own
+   * edge — a ribbon in the air with no thickness reads as a texture painted on
+   * the sky. The SOFFIT (the underside) is why driving beneath a viaduct is
+   * worth doing at all: there is a ceiling down there. The PILLARS are why it
+   * is standing up, and they are the reason this method needs the terrain —
+   * each one is cut to the ground it happens to land on, so a bridge across a
+   * valley grows longer legs in the middle without anybody authoring that.
+   *
+   * The parapets are the same walls the physics already has (`_buildParapets`),
+   * drawn from the colliders so the thing you hit and the thing you see cannot
+   * drift apart.
+   */
+  _buildDeckMesh(materials, theme, terrain) {
+    let any = false;
+    for (let i = 0; i < this.count; i++) {
+      if (this.deck[i] > 0.01) {
+        any = true;
+        break;
+      }
+    }
+    if (!any) return null;
+
+    const R = theme.road;
+    const P = theme.props;
+    const structure = new GeomBuilder();
+    const T = ROAD.deckThickness;
+    const c = this.count;
+    const last = this.loop ? c : c - 1;
+
+    for (let i = 0; i < last; i++) {
+      const j = this.loop ? (i + 1) % c : i + 1;
+      // Both ends of a span have to be in the air, or the abutment gets a face
+      // hanging in mid-air where the deck begins.
+      if (this.deck[i] < 0.5 || this.deck[j] < 0.5) continue;
+
+      const hwI = this.halfWidth[i] + ROAD.parapetThickness;
+      const hwJ = this.halfWidth[j] + ROAD.parapetThickness;
+      const topI = ROAD.roadLift;
+      const under = -T;
+
+      // Sides, seen edge-on from the road below.
+      for (const s of [-1, 1]) {
+        const t0 = this._edge(i, hwI * s, topI);
+        const t1 = this._edge(j, hwJ * s, topI);
+        const b0 = this._edge(i, hwI * s, under);
+        const b1 = this._edge(j, hwJ * s, under);
+        if (s > 0) structure.addQuadFacing(t0, b0, b1, t1, shade(R.surface, -0.18));
+        else structure.addQuadFacing(b0, t0, t1, b1, shade(R.surface, -0.18));
+      }
+
+      // The soffit. Darker than anything else on the structure, because it
+      // never sees the sun and because it is what makes the underside read as
+      // the underside of something.
+      structure.addQuadFacing(
+        this._edge(j, -hwJ, under),
+        this._edge(j, hwJ, under),
+        this._edge(i, hwI, under),
+        this._edge(i, -hwI, under),
+        shade(R.surface, -0.42)
+      );
+    }
+
+    // Pillars, at a spacing rather than per sample: a leg every few metres is
+    // a wall, and a wall under a bridge is a dam.
+    if (terrain) {
+      const step = Math.max(2, Math.round(ROAD.pillarSpacing / ROAD.sampleSpacing));
+      for (let i = 0; i < this.count; i += step) {
+        if (!this.isElevated(i)) continue;
+        const x = this.px[i];
+        const z = this.pz[i];
+        const ground = terrain.heightAt(x, z);
+        const top = this.py[i] - T;
+        const height = top - ground + 1.5;
+        // Nothing to hold up: the deck is grazing the hillside here.
+        if (height < 3) continue;
+        const hw = ROAD.pillarHalfWidth;
+        structure.addBox(
+          { x, y: ground - 0.75 + height / 2, z },
+          { x: hw * 2, y: height, z: hw * 1.3 },
+          { all: shade(P.barrier, -0.28), top: shade(P.barrier, -0.1) },
+          Math.atan2(this.tx[i], this.tz[i])
+        );
+        // A wider foot, so the leg meets the ground rather than ending at it.
+        structure.addBox(
+          { x, y: ground + 0.6, z },
+          { x: hw * 2.9, y: 1.2, z: hw * 2.1 },
+          { all: shade(P.barrier, -0.34), top: shade(P.barrier, -0.16) },
+          Math.atan2(this.tx[i], this.tz[i])
+        );
+      }
+    }
+
+    // The walls, drawn from the colliders that already exist.
+    for (const col of this.colliders) {
+      if (col.kind !== 'parapet') continue;
+      structure.addBox(
+        { x: col.x, y: col.y, z: col.z },
+        { x: col.halfX * 2, y: col.halfY * 2, z: col.halfZ * 2 },
+        { all: P.barrier, top: shade(P.barrier, 0.14) },
+        col.rotationY
+      );
+    }
+
+    const mesh = new THREE.Mesh(structure.build(), materials.get('barrier'));
+    mesh.name = 'deck';
+    return mesh;
   }
 
   _buildBarrierMesh(materials, theme) {
@@ -800,6 +1080,18 @@ export class Track {
 }
 
 const _queryScratch = {};
+
+/**
+ * Metres of lateral error that one metre of height error is worth, when a
+ * caller tells `query` how high up it is.
+ *
+ * Sized against the two things it has to separate. A spiral's decks are twelve
+ * to twenty metres apart vertically, and a road is sixteen metres wide: at 3
+ * the wrong deck costs 36m+ of score and can never win, while a car half a
+ * metre off its own deck (which is every car, every frame — they sit on top of
+ * it) costs 1.5m and never changes the answer.
+ */
+const HEIGHT_BIAS = 3;
 
 /** Ice and mud read as a visible change in the road, not an invisible trap. */
 function surfaceColor(surface, base, theme) {

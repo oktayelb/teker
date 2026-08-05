@@ -24,44 +24,87 @@ export const LANG = 'en';
 export const BEATS = {
   // -- before anything ------------------------------------------------------
   'title.tagline': {
-    subtitle: { text: 'Three parkours. Forest circuit. Standard rules.', duration: 3.2, tone: 'system' },
+    subtitle: { text: 'Ten parkours. Forest circuit. Standard rules.', duration: 3.2, tone: 'system' },
   },
 
-  // -- bölüm one ------------------------------------------------------------
+  // -- the ten parkours ------------------------------------------------------
   //
   // Beat ids are LEVEL ids: the director looks up `<levelId>.pre` and
   // `<levelId>.post` for whichever level it is staging (see `_beat`). A level
   // with nothing written for it plays nothing, so adding one is adding lines
   // here when you have them — not before.
+  //
+  // The `.pre` lines all do the same two jobs: name the place, and say the one
+  // thing about it the player needs before the lights go out. The `.post`
+  // lines are the system counting, and it counts in a flatter voice each time.
   'level1.pre': [
     { subtitle: { text: 'ÇAM HALKASI · Bölüm 1', duration: 2.6, tone: 'system' } },
     { subtitle: { text: 'Two laps. Stay on the road.', duration: 2.8 } },
   ],
-  'level1.post': [
-    { subtitle: { text: 'Clean run. Nothing unusual.', duration: 2.6, tone: 'system' } },
-  ],
+  'level1.post': [{ subtitle: { text: 'Clean run. Nothing unusual.', duration: 2.6, tone: 'system' } }],
 
-  // -- bölüm two ------------------------------------------------------------
   'level2.pre': [
     { subtitle: { text: 'DERE GEÇİDİ · Bölüm 2', duration: 2.6, tone: 'system' } },
     { subtitle: { text: 'The surface changes on the descent.', duration: 2.8 } },
   ],
-  'level2.post': [{ subtitle: { text: 'Two of three complete.', duration: 2.4, tone: 'system' } }],
+  'level2.post': [{ subtitle: { text: 'Two of ten complete.', duration: 2.4, tone: 'system' } }],
 
-  // -- bölüm three ----------------------------------------------------------
   'level3.pre': [
     { subtitle: { text: 'SIRT YOLU · Bölüm 3', duration: 2.6, tone: 'system' } },
     { subtitle: { text: 'Not a road. Dirt, posts, and the lights they hung for you.', duration: 3.4 } },
   ],
+  'level3.post': [{ subtitle: { text: 'Three of ten. Unit within tolerance.', duration: 2.6, tone: 'system' } }],
+
+  'level4.pre': [
+    { subtitle: { text: 'TAŞOCAĞI · Bölüm 4', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'Somebody took this hill apart. You race what is left of it.', duration: 3.4 } },
+  ],
+  'level4.post': [{ subtitle: { text: 'Four of ten.', duration: 2.2, tone: 'system' } }],
+
+  'level5.pre': [
+    { subtitle: { text: 'GÖL KIYISI · Bölüm 5', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'It is raining. Everything you know about braking is now wrong.', duration: 3.6 } },
+  ],
+  'level5.post': [{ subtitle: { text: 'Five of ten. Weather logged.', duration: 2.4, tone: 'system' } }],
+
+  'level6.pre': [
+    { subtitle: { text: 'VİYADÜK · Bölüm 6', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'They built a road over the valley. Nobody says why.', duration: 3.4 } },
+    { subtitle: { text: 'The way down is a spiral. Take it slowly.', duration: 3.0 } },
+  ],
+  'level6.post': [{ subtitle: { text: 'Six of ten.', duration: 2.2, tone: 'system' } }],
+
+  'level7.pre': [
+    { subtitle: { text: 'KAR HATTI · Bölüm 7', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'White ground, white sky. The trees are the only map you get.', duration: 3.6 } },
+  ],
+  'level7.post': [{ subtitle: { text: 'Seven of ten. Unit still on manifest.', duration: 2.6, tone: 'system' } }],
+
+  /** The last one, and the one that breaks. See `src/levels/level8.js`. */
+  'level8.pre': [
+    { subtitle: { text: 'KAPAK · Bölüm 8', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'Dirt, in the rain, in the dark.', duration: 2.8 } },
+    { subtitle: { text: 'You have driven all of this before. Just not at once.', duration: 3.4 } },
+  ],
   /** The rig fails. Played the instant the lights go. */
-  'level3.blackout': [
+  'level8.blackout': [
     { subtitle: { text: 'The lights go out.', duration: 2.0, tone: 'system' } },
     { subtitle: { text: 'All of them, at once, for a long way ahead.', duration: 3.0 } },
   ],
   /** Played once, as the player first reaches the wet stretch. */
-  'level3.ice': {
+  'level8.ice': {
     subtitle: { text: 'The road has stopped telling you where it goes.', duration: 2.6 },
   },
+
+  /** Nine and ten are out past the story. Nobody is narrating them. */
+  'level9.pre': [
+    { subtitle: { text: 'HAVAİ HAT · Bölüm 9', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'Half of this one is in the air.', duration: 2.8 } },
+  ],
+  'level10.pre': [
+    { subtitle: { text: 'SON HALKA · Bölüm 10', duration: 2.6, tone: 'system' } },
+    { subtitle: { text: 'Everything the other nine taught you. In the dark.', duration: 3.4 } },
+  ],
 
   // -- the break ------------------------------------------------------------
   /** The instant the car leaves the road and finds no barrier. */

@@ -146,7 +146,9 @@ export class AiDriver {
     const t = this.track;
     if (!t) return;
 
-    const q = t.query(v.position.x, v.position.z, this._query);
+    // The car's own height, so a driver on a spiral is asked about the deck
+    // it is on rather than the one crossing under it. @see Track#query
+    const q = t.query(v.position.x, v.position.z, this._query, v.position.y);
     if (!q) {
       // Off the map entirely — head for the nearest checkpoint instead.
       const cp = t.checkpoints[0];

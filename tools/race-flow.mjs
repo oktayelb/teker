@@ -7,8 +7,10 @@
  *      stays open until the player presses ENTER.
  *   2. The countdown never runs behind the fade. When the new grid appears the
  *      race must still be on the grid, not already racing.
- *   3. `?start=race3` boots the story straight into bölüm 3 with the director
- *      still attached, so the blackout and everything after it still happen.
+ *   3. `?start=` boots the story straight into the level that breaks, with the
+ *      director still attached, so the blackout and everything after it still
+ *      happen. The level id comes from `LEVELS` rather than being written here:
+ *      the stage that ends the game has moved once already.
  *
  * Every level owns its map now, so 1 and 2 are also checks that a level swap
  * (a whole world built behind the fade) does not leak into what the player
@@ -18,6 +20,10 @@
  */
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
+
+// Which level ends the game, read from the game rather than assumed.
+const { LEVELS } = await import('../src/levels/index.js');
+const BREAKS = (LEVELS.find((l) => l.story?.breaks) || LEVELS.at(-1)).id;
 
 const PORT = 8239;
 const BASE = `http://localhost:${PORT}/index.html`;
@@ -89,7 +95,7 @@ try {
   const title = await page.evaluate(() =>
     [...document.querySelectorAll('.tk-menu .tk-btn')].map((b) => b.dataset.id)
   );
-  check('title menu offers a shortcut to the level that breaks', title.includes('level3'), title.join(','));
+  check('title menu offers a shortcut to the level that breaks', title.includes(BREAKS), title.join(','));
 
   await page.keyboard.press('Enter'); // BAŞLA
   // The grid is held for gridHold before the lights: catch it mid-hold.
@@ -145,7 +151,7 @@ try {
 
   // =========================================================================
   console.log('\n— B. ?start=race3 ————————————————————————————————————————');
-  const p3 = await open('?start=race3');
+  const p3 = await open(`?start=${BREAKS}`);
   await page3Checks(p3);
   await p3.close();
 } finally {
@@ -154,17 +160,17 @@ try {
 }
 
 async function page3Checks(p3) {
-  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "level3"', { timeout: 30000 });
+  await p3.waitForFunction(`TEKER.game.modes.current?.track?.id === "${BREAKS}"`, { timeout: 60000 });
   let s = await probe(p3);
-  check('no title screen — straight into bölüm 3', !s.open.includes('scrim'), s.open);
-  check('on level3', s.track === 'level3', String(s.track));
+  check('no title screen — straight into the stage that breaks', !s.open.includes('scrim'), s.open);
+  check(`on ${BREAKS}`, s.track === BREAKS, String(s.track));
 
   await p3.waitForFunction(
     'Number(getComputedStyle(document.querySelector(".tk-fade")).opacity) < 0.05',
     { timeout: 20000 }
   );
   s = await probe(p3);
-  check('parkur 3 fades in before it starts', s.state !== 'racing', `state=${s.state} fade=${s.fade}`);
+  check('it fades in before it starts', s.state !== 'racing', `state=${s.state} fade=${s.fade}`);
 
   await p3.waitForFunction('TEKER.game.modes.current?.state === "racing"', { timeout: 20000 });
   const d = await p3.evaluate(() => ({
@@ -172,8 +178,9 @@ async function page3Checks(p3) {
     races: TEKER.game.flags.racesCompleted,
     showResults: TEKER.game.modes.current.showResults,
   }));
-  check('director counts this as the third race', d.races === 2, `racesCompleted=${d.races}`);
-  check('parkur 3 has no results screen — the story ends it', d.showResults === false, String(d.showResults));
+  check('director counts the races that were skipped', d.races === LEVELS.findIndex((l) => l.id === BREAKS),
+    `racesCompleted=${d.races}`);
+  check('it has no results screen — the story ends it', d.showResults === false, String(d.showResults));
 
   // The whole point of the shortcut: the director must still be attached, so
   // driving off the edge still breaks the game open instead of doing nothing.

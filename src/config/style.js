@@ -281,6 +281,247 @@ export const THEMES = {
     grade: { lift: 0.035, gain: 1.2, saturation: 0.78, tint: 0xb8c6e0 },
   },
 
+  // -------------------------------------------------------------------------
+  // WEATHER AND TIME OF DAY
+  // -------------------------------------------------------------------------
+  // One palette per *place*, not per mood: a level names the theme its map is
+  // in and never changes it. All of them inherit `forest`, so they are only the
+  // colours that differ — and anything added to `forest` later (a new prop, a
+  // new animal) arrives in every one of them for free.
+
+  /**
+   * RAIN — an overcast afternoon with the water still coming down.
+   *
+   * The load-bearing colour here is the road: wet tarmac is darker, bluer and
+   * shinier than dry, and it is the only thing on screen that tells the player
+   * the grip has changed before they find out in a corner. Everything else is
+   * desaturated toward the fog, because that is what rain does to a valley.
+   */
+  rain: {
+    label: 'Rain',
+    inherits: 'forest',
+    fog: { color: 0x8a99a0, near: 24, far: 190, density: 0.0125, exponential: true },
+    sky: { top: 0x7e8e98, bottom: 0xa8b2b4, sunColor: 0xb8c2c4, sunSize: 0.0 },
+    light: {
+      direction: { x: 0.2, y: 0.85, z: 0.3 },
+      color: 0xc4d0d6,
+      intensity: 2.4,
+      ambientColor: 0x6a7a86,
+      ambientIntensity: 2.6,
+      groundBounce: 0x3e4a3e,
+    },
+    ground: {
+      base: 0x40573a,
+      variantA: 0x374c33,
+      variantB: 0x4c6442,
+      cliff: 0x59564e,
+      dirt: 0x4e4132,
+      mud: 0x322a20,
+      grit: 0x6e6a62,
+    },
+    /** Standing water: dark, and the paint on it reads brighter than the road. */
+    road: {
+      surface: 0x33343c,
+      shoulder: 0x574a38,
+      centreLine: 0xc8c4a8,
+      edgeLine: 0xdcd8c0,
+      kerbA: 0xa8402f,
+      kerbB: 0xdcd8c0,
+    },
+    foliage: {
+      trunk: 0x3a2e22,
+      canopyA: 0x27431f,
+      canopyB: 0x315227,
+      canopyC: 0x1e3519,
+      bush: 0x2e4a24,
+      grassBlade: 0x4c6636,
+      fern: 0x2a4522,
+      litter: 0x554427,
+    },
+    grade: { lift: 0.03, gain: 1.06, saturation: 0.78, tint: 0xcfdae0 },
+  },
+
+  /**
+   * STORM — the same weather after dark, which is a different problem.
+   *
+   * Inherits `night` rather than `rain`: the thing that makes a night race hard
+   * is that the only light is yours, and rain on top of that is what turns a
+   * road into a set of reflections. The road is nearly black and the paint is
+   * the brightest thing in the world.
+   */
+  storm: {
+    label: 'Storm',
+    inherits: 'night',
+    fog: { color: 0x10141c, near: 14, far: 130, density: 0.023, exponential: true },
+    sky: { top: 0x070a12, bottom: 0x151c28, sunColor: 0x1e2636, sunSize: 0.0 },
+    light: {
+      direction: { x: -0.25, y: 0.6, z: -0.4 },
+      color: 0x5a6c92,
+      intensity: 2.2,
+      ambientColor: 0x232f44,
+      ambientIntensity: 3.0,
+      groundBounce: 0x10160f,
+    },
+    road: {
+      surface: 0x1e1f28,
+      shoulder: 0x241f16,
+      centreLine: 0x8a8670,
+      edgeLine: 0x9a9680,
+      kerbA: 0x6a2a22,
+      kerbB: 0x9a9680,
+    },
+    grade: { lift: 0.04, gain: 1.24, saturation: 0.7, tint: 0xa8bcdc },
+  },
+
+  /**
+   * DUSK — the last twenty minutes of usable light, and the prettiest of them.
+   *
+   * The sun is nearly on the horizon (`direction.y` is low), which is why this
+   * theme looks different from every other one at the same time of day: long
+   * shading across the hills, warm on everything facing west and cold in every
+   * hollow that is not.
+   */
+  dusk: {
+    label: 'Dusk',
+    inherits: 'forest',
+    fog: { color: 0xb38a6e, near: 45, far: 340, density: 0.0062, exponential: true },
+    /** A big low sun, because the whole level is driving into it. */
+    sky: { top: 0x3a4a78, bottom: 0xe8a05a, sunColor: 0xffd8a0, sunSize: 0.075 },
+    light: {
+      direction: { x: 0.85, y: 0.22, z: -0.35 },
+      color: 0xffc890,
+      intensity: 3.4,
+      ambientColor: 0x5a5878,
+      ambientIntensity: 1.7,
+      groundBounce: 0x4e4030,
+    },
+    ground: {
+      base: 0x5a6438,
+      variantA: 0x4c5630,
+      variantB: 0x6b7040,
+      cliff: 0x7a6450,
+      dirt: 0x7d5c36,
+      mud: 0x4a3826,
+      grit: 0x9a8468,
+    },
+    road: {
+      surface: 0x54484a,
+      shoulder: 0x8a6b46,
+      centreLine: 0xe8d0a0,
+      edgeLine: 0xf4e2bc,
+      kerbA: 0xd05038,
+      kerbB: 0xf4e2bc,
+    },
+    foliage: {
+      trunk: 0x53381f,
+      canopyA: 0x36501e,
+      canopyB: 0x486028,
+      canopyC: 0x2a3d18,
+      bush: 0x415420,
+      grassBlade: 0x6d7a36,
+      fern: 0x3c4c22,
+      litter: 0x7a5628,
+    },
+    grade: { lift: 0.02, gain: 1.06, saturation: 1.05, tint: 0xffe4c8 },
+  },
+
+  /**
+   * MIST — early morning, and you cannot see the next corner.
+   *
+   * The fog is the level design here: `far` is barely over a hundred metres, so
+   * a track in this theme has to be readable at short range and is a memory
+   * test at speed. Kept pale rather than dark — being unable to see in daylight
+   * is a different and more unsettling thing than being unable to see at night.
+   */
+  mist: {
+    label: 'Mist',
+    inherits: 'forest',
+    fog: { color: 0xc6ccc4, near: 18, far: 150, density: 0.0165, exponential: true },
+    sky: { top: 0xb8c2c0, bottom: 0xdce0d8, sunColor: 0xf0f0e0, sunSize: 0.06 },
+    light: {
+      direction: { x: 0.35, y: 0.72, z: 0.25 },
+      color: 0xe8ecdc,
+      intensity: 2.6,
+      ambientColor: 0x93a099,
+      ambientIntensity: 2.8,
+      groundBounce: 0x536046,
+    },
+    ground: {
+      base: 0x5c7048,
+      variantA: 0x4f6440,
+      variantB: 0x6a7c52,
+      cliff: 0x77746a,
+      dirt: 0x6f5f45,
+      mud: 0x4a4234,
+      grit: 0x94908a,
+    },
+    foliage: {
+      trunk: 0x50432f,
+      canopyA: 0x3a5c30,
+      canopyB: 0x476b3a,
+      canopyC: 0x2f4a28,
+      bush: 0x436034,
+      grassBlade: 0x668a48,
+      fern: 0x3d5c32,
+      litter: 0x6f5c3a,
+    },
+    grade: { lift: 0.06, gain: 0.98, saturation: 0.82, tint: 0xe8f0ec },
+  },
+
+  /**
+   * SNOW — the high ground, above where the forest bothers.
+   *
+   * Everything pale, and the two things that are not — trunks, and the road —
+   * are the only things a player can navigate by. That is the whole idea of the
+   * level this belongs to: on white ground with white fog, the trees are the
+   * map. The road is deliberately left dark, because a snow-covered road you
+   * cannot see the edges of is not a track, it is a field.
+   */
+  snow: {
+    label: 'Snow',
+    inherits: 'forest',
+    fog: { color: 0xd4dce4, near: 30, far: 230, density: 0.0105, exponential: true },
+    sky: { top: 0x9fb4c8, bottom: 0xdfe6ec, sunColor: 0xffffff, sunSize: 0.02 },
+    light: {
+      direction: { x: 0.3, y: 0.68, z: 0.5 },
+      color: 0xeaf0f8,
+      intensity: 2.9,
+      ambientColor: 0x8fa4bc,
+      ambientIntensity: 2.9,
+      groundBounce: 0xb8c8d4,
+    },
+    ground: {
+      base: 0xcdd8e0,
+      variantA: 0xbecad4,
+      variantB: 0xdae2e8,
+      cliff: 0x8a8c92,
+      dirt: 0xa8a8a4,
+      mud: 0x6e737a,
+      grit: 0xe8eef2,
+    },
+    road: {
+      surface: 0x3e4248,
+      shoulder: 0xaeb6bc,
+      centreLine: 0xd8d2b0,
+      edgeLine: 0xf0f4f8,
+      kerbA: 0xb03a2e,
+      kerbB: 0xf0f4f8,
+    },
+    foliage: {
+      trunk: 0x3b3229,
+      canopyA: 0x24402a,
+      canopyB: 0x2e4c32,
+      canopyC: 0x1c3222,
+      bush: 0x8fa08c,
+      grassBlade: 0xa8b8b0,
+      fern: 0x627064,
+      litter: 0x9aa09c,
+    },
+    props: { rock: 0x8e9298, barrier: 0xe8ecf0, barrierAlt: 0xb03a2e, post: 0x6a6a66 },
+    dome: { glass: 0xc0d8e4, seam: 0x8fe0d0 },
+    grade: { lift: 0.05, gain: 1.05, saturation: 0.72, tint: 0xeaf2fa },
+  },
+
   /** The moment the illusion cracks. Used in short bursts, never for long. */
   glitch: {
     label: 'Glitch',

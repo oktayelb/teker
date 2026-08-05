@@ -133,7 +133,19 @@ export class LevelHost {
       g.ui.minimap.setWorld(null);
     }
 
-    // 3. The level's own map.
+    // 3. THE THEME FIRST, THEN THE MAP.
+    //
+    // Not a presentation detail and not reorderable: a world bakes the theme
+    // into its vertex colours as it is built (`Terrain#buildMesh`, every prop
+    // factory), so the palette has to be the level's before anything is
+    // generated. Building a snow level while the renderer is still in `forest`
+    // gives you a white sky, white fog, white light — and green grass, because
+    // the ground was coloured before anybody said where we were.
+    //
+    // `?theme=` still wins: it is a debug override and its whole point is
+    // seeing a level under a palette it was not written for.
+    g.setTheme(g.boot.theme || level.theme || 'forest', 0);
+
     const world = new World({
       materials: g.materials,
       theme: g.renderer.theme,

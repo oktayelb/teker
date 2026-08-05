@@ -139,8 +139,13 @@ const t0 = Date.now();
 /** Bölüm 1's map: the barriered oval in daylight. Most checks below use it. */
 const world = await buildLevel('level1');
 const buildMs = Date.now() - t0;
-/** Bölüm 3's map: the stage that breaks, and the only place the escape exists. */
-const world3 = await buildLevel('level3');
+/**
+ * The map of whichever level says it breaks — found rather than named, because
+ * the stage that ends the game has moved once already (bölüm 3 → bölüm 8) and
+ * the checks below are about the trap, not about a number.
+ */
+const breaking = LEVELS.find((l) => l.story?.breaks) || LEVELS[LEVELS.length - 1];
+const world3 = await buildLevel(breaking.id);
 const t1 = world.mainTrack;
 const t3 = world3.mainTrack;
 
@@ -205,8 +210,34 @@ ok('build time is sane', buildMs < 30000, `${buildMs}ms`);
         }
       }
       slopes.sort((a, b) => a - b);
-      ok(`…and glass a car can climb`, slopes[Math.floor(slopes.length * 0.99)] < 33,
-        `p99 ${slopes[Math.floor(slopes.length * 0.99)].toFixed(1)}°, worst ${slopes.at(-1).toFixed(1)}°`);
+      // Measured at the 95th rather than the 99th, and the difference is a
+      // level like the quarry: a map with a cliff in it has glass over the
+      // cliff, and that patch of roof is unclimbable because the ground under
+      // it is. What has to hold is that the roof is drivable in general — if
+      // the *bulk* of it stands up like a wall there is nowhere to get on.
+      const p95 = slopes[Math.floor(slopes.length * 0.95)];
+      ok(`…and glass a car can climb`, p95 < 30,
+        `p95 ${p95.toFixed(1)}°, p99 ${slopes[Math.floor(slopes.length * 0.99)].toFixed(1)}°, worst ${slopes.at(-1).toFixed(1)}°`);
+    }
+
+    // The road faces up. A back-facing surface does not look broken, it looks
+    // *absent* — and the way it happens is a spline cusp folding the quads on
+    // the inside of a corner, which is a thing a new level can author by
+    // accident and nothing else would catch.
+    {
+      const group = w.root.getObjectByName(`track:${track.id}`);
+      let worstUp = 1;
+      let checked = 0;
+      for (const meshName of ['road', 'roadDecals', 'startLine']) {
+        const nrm = group?.getObjectByName(meshName)?.geometry?.getAttribute('normal');
+        if (!nrm) continue;
+        for (let i = 0; i < nrm.count; i += 5) {
+          worstUp = Math.min(worstUp, nrm.getY(i));
+          checked++;
+        }
+      }
+      ok(`…and its road surface faces up`, checked > 100 && worstUp > 0.25,
+        `${checked} normals, worst up-component ${worstUp.toFixed(3)}`);
     }
 
     heights.push({ id: level.id, h: [0, 300, -700].map((x) => w.terrain.heightAt(x, x * 0.4)) });
@@ -409,18 +440,19 @@ for (const w of [world, world3]) {
   );
 }
 
-// Parkur 3 is an unsealed track with a slick section, marked by plastic posts
-// and lit by a rig — not a road with Armco. Check the shape of it holds.
+// The stage that breaks is an unsealed track with a slick section, marked by
+// plastic posts and lit by a rig — not a road with Armco. Check that the shape
+// of it holds, because the ending of the game is produced by that shape.
 const slickSamples = t3.surfaces.filter((s) => s === 'SLICK').length;
-ok('parkur 3 has a slick section', slickSamples > 20, `${slickSamples} samples`);
+ok(`${breaking.name}: a slick section`, slickSamples > 20, `${slickSamples} samples`);
 ok(
-  'parkur 3 is unsealed for its whole length',
+  `${breaking.name}: unsealed for its whole length`,
   t3.surfaces.every((s) => s !== 'TARMAC'),
   `${t3.surfaces.filter((s) => s === 'TARMAC').length} tarmac samples`
 );
-ok('parkur 3 has no barriers at all', t3.colliders.length === 0, `${t3.colliders.length} colliders`);
-ok('parkur 3 has plastic markers instead', t3.markers.length > 100, `${t3.markers.length} posts`);
-ok('parkur 3 has a lighting rig', t3.lightAnchors.length > 20, `${t3.lightAnchors.length} lamps`);
+ok(`${breaking.name}: no barriers at all`, t3.colliders.length === 0, `${t3.colliders.length} colliders`);
+ok(`${breaking.name}: plastic markers instead`, t3.markers.length > 100, `${t3.markers.length} posts`);
+ok(`${breaking.name}: a lighting rig`, t3.lightAnchors.length > 20, `${t3.lightAnchors.length} lamps`);
 
 // The markers and the lights stop over the same stretch, and the slick section
 // is inside it. If these three drift apart the whole beat stops landing.
@@ -445,7 +477,7 @@ ok(
 // Nothing on this track may be solid — that is the whole design.
 const markerColliders = t3.markers.filter((m) => m.solid);
 ok('the plastic posts are not solid', markerColliders.length === 0);
-ok('parkur 1 is fully enclosed', t1.colliders.length > 100);
+ok('bölüm 1 is fully enclosed', t1.colliders.length > 100);
 
 // ---------------------------------------------------------------------------
 section('5. physics — and the escape actually happens');
@@ -2429,6 +2461,200 @@ section('16. the glass over the parkours');
 
     off();
   }
+}
+
+// ---------------------------------------------------------------------------
+section('17. every level is drivable, and the ones in the air hold you up');
+
+// The point of this section is that ten levels is too many to check by driving
+// them. A track is a spline through control points somebody typed, and the
+// ways it can be wrong — a corner tighter than the car can turn, a climb
+// steeper than it can pull, a deck that is not there when you land on it — all
+// present as "the AI drives into the scenery and stops", which is exactly what
+// a headless run can measure.
+{
+  const AI_LAP_SECONDS = 150;
+
+  for (const level of LEVELS) {
+    const w = await buildLevel(level.id, { scatter: false });
+    const track = w.mainTrack;
+    const car = new Vehicle({ profile: 'rival', world: w, id: `lap-${level.id}` });
+    // Rivals belong to the track: `ignoreSurfaces` is what stops this becoming
+    // a test of whether an AI can drive on ice, which it cannot and is not
+    // supposed to be able to. What is being checked here is the SHAPE.
+    car.ignoreSurfaces = true;
+    const slot = track.gridSlot(0, 7, 4.2, 14);
+    car.reset(slot.position, slot.heading);
+    const ai = new AiDriver(car, { track, skill: 0.85, aggression: 0.4, seed: 11, world: w });
+
+    const q = {};
+    let last = track.query(car.position.x, car.position.z, q, car.position.y)?.progress ?? 0;
+    let travelled = 0;
+    let stuckFor = 0;
+    let worstOff = 0;
+    let seconds = 0;
+    const steps = Math.round(AI_LAP_SECONDS / DT);
+    for (let i = 0; i < steps && travelled < 0.995; i++) {
+      car.setCommand(ai.update(DT));
+      car.fixedUpdate(DT);
+      seconds += DT;
+      const r = track.query(car.position.x, car.position.z, q, car.position.y);
+      if (r) {
+        let d = r.progress - last;
+        if (d < -0.5) d += 1;
+        else if (d > 0.5) d -= 1;
+        if (d > 0) travelled += d;
+        last = r.progress;
+        worstOff = Math.max(worstOff, r.dist - r.halfWidth);
+      }
+      stuckFor = car.speed < 1.5 ? stuckFor + DT : 0;
+      if (stuckFor > 6) break;
+    }
+
+    ok(
+      `${level.id} can be driven all the way round`,
+      travelled >= 0.99,
+      `${(travelled * 100).toFixed(0)}% of a lap in ${seconds.toFixed(0)}s` +
+        (stuckFor > 6 ? ', then stopped' : '')
+    );
+    // …and round it on the road. A lap completed by ploughing across the
+    // infield is not a lap, and on a level with a deck in it, it is a fall.
+    ok(`…without leaving the ribbon`, worstOff < 14, `worst ${worstOff.toFixed(1)}m past the edge`);
+    w.dispose();
+  }
+}
+
+// -- the road in the air ------------------------------------------------------
+{
+  const elevated = LEVELS.filter((l) => (l.tracks[0].elevated || []).length > 0);
+  ok('some levels put the road in the air', elevated.length >= 2, elevated.map((l) => l.id).join(', '));
+
+  for (const level of elevated) {
+    const w = await buildLevel(level.id, { scatter: false });
+    const t = w.mainTrack;
+
+    // 1. THE GROUND IS STILL UNDER IT. The whole reason `shapeTerrain` backs
+    //    off over a deck: flatten the land to a road forty metres up and the
+    //    valley it was crossing fills in, and there is no bridge, just a hill.
+    let minClear = Infinity;
+    let deckSamples = 0;
+    for (let i = 0; i < t.count; i++) {
+      if (!t.isElevated(i)) continue;
+      deckSamples++;
+      minClear = Math.min(minClear, t.py[i] - w.terrain.heightAt(t.px[i], t.pz[i]));
+    }
+    ok(`${level.id}: the deck stands clear of the ground`, minClear > 4,
+      `${deckSamples} samples in the air, lowest ${minClear.toFixed(1)}m over it`);
+
+    // 2. IT IS GROUND ONLY FROM ABOVE. Same query, two heights, two answers.
+    const i = Math.round(t.count * (level.tracks[0].elevated[0].from + level.tracks[0].elevated[0].to) / 2);
+    const x = t.px[i];
+    const z = t.pz[i];
+    const above = w.sampleGround(x, z, { position: new THREE.Vector3(x, t.py[i] + 0.5, z) });
+    const below = w.sampleGround(x, z, { position: new THREE.Vector3(x, w.terrain.heightAt(x, z) + 0.6, z) });
+    ok(`…and a car on the deck is on the road`, Math.abs(above.height - t.py[i]) < 1,
+      `${above.surface} at ${above.height.toFixed(1)}m`);
+    ok(`…while a car underneath it is on the earth`, below.height < t.py[i] - 4,
+      `${below.surface} at ${below.height.toFixed(1)}m, deck at ${t.py[i].toFixed(1)}m`);
+
+    // 3. THERE IS A WALL ALONG THE EDGE, and it is solid.
+    const parapets = t.colliders.filter((c) => c.kind === 'parapet');
+    ok(`…with a parapet along it`, parapets.length > 10, `${parapets.length} sections`);
+
+    w.dispose();
+  }
+}
+
+// -- a road that passes over itself ------------------------------------------
+// The spiral on bölüm 6 comes down through its own shadow, which means two
+// pieces of road are at the same (x, z) and only their height tells them apart.
+// Everything that asks the track where it is has to ask with a height, or a car
+// on the top deck is told it is on the bottom one and is thirty metres in the
+// air with no road under it.
+{
+  const level = LEVELS.find((l) => l.id === 'level6');
+  const w = await buildLevel(level.id, { scatter: false });
+  const t = w.mainTrack;
+  const q = {};
+
+  // Find where the ribbon crosses itself in plan view.
+  let crossing = null;
+  for (let i = 0; i < t.count && !crossing; i += 3) {
+    for (let j = i + 60; j < t.count; j += 3) {
+      const d = Math.hypot(t.px[i] - t.px[j], t.pz[i] - t.pz[j]);
+      if (d < 6 && Math.abs(t.py[i] - t.py[j]) > 12) {
+        crossing = { i, j, gap: Math.abs(t.py[i] - t.py[j]) };
+        break;
+      }
+    }
+  }
+  ok('bölüm 6 passes over itself', !!crossing,
+    crossing ? `${crossing.gap.toFixed(0)}m between the decks` : 'no crossing found');
+
+  if (crossing) {
+    const { i, j } = crossing;
+    const hi = t.py[i] > t.py[j] ? i : j;
+    const lo = hi === i ? j : i;
+    const onTop = t.query(t.px[hi], t.pz[hi], q, t.py[hi] + 0.5);
+    ok('…and asking from the upper deck answers with the upper deck',
+      Math.abs(onTop.height - t.py[hi]) < 2, `${onTop.height.toFixed(1)}m vs ${t.py[hi].toFixed(1)}m`);
+    const underneath = t.query(t.px[lo], t.pz[lo], q, t.py[lo] + 0.5);
+    ok('…and asking from underneath answers with the lower one',
+      Math.abs(underneath.height - t.py[lo]) < 2, `${underneath.height.toFixed(1)}m vs ${t.py[lo].toFixed(1)}m`);
+    // Without a height it is a coin toss, and that is exactly why every caller
+    // that owns a car passes one.
+    const blind = t.query(t.px[hi], t.pz[hi], q);
+    ok('…and without a height it still answers something sane',
+      Math.abs(blind.height - t.py[hi]) < 2 || Math.abs(blind.height - t.py[lo]) < 2,
+      `${blind.height.toFixed(1)}m`);
+  }
+  w.dispose();
+}
+
+// -- weather -----------------------------------------------------------------
+{
+  const wet = LEVELS.filter((l) => l.map.weather?.wet);
+  const snowy = LEVELS.filter((l) => l.map.weather?.kind === 'snow');
+  ok('some levels are wet', wet.length >= 2, wet.map((l) => l.id).join(', '));
+  ok('…and some are snowed on', snowy.length >= 1, snowy.map((l) => l.id).join(', '));
+
+  const w = await buildLevel(wet[0].id, { scatter: false });
+  const t = w.mainTrack;
+  const i = Math.round(t.count * 0.05);
+  const g = w.sampleGround(t.px[i], t.pz[i]);
+  // The road is not made of anything different; it is the same road, wet.
+  ok(`${wet[0].id}: the road reports WET`, g.surface === 'WET', g.surface);
+  const { surfaceById } = await import('../src/config/tuning.js');
+  ok('…and wet tarmac grips less than dry',
+    surfaceById('WET').grip < surfaceById('TARMAC').grip * 0.85,
+    `${surfaceById('WET').grip} vs ${surfaceById('TARMAC').grip}`);
+  ok('…and there is rain in the world to explain it',
+    w.weather?.mesh?.count > 200, `${w.weather?.mesh?.count} drops`);
+  // Nothing about the weather may cost anything when there is none.
+  const dry = await buildLevel('level1', { scatter: false });
+  ok('a dry level has no weather at all', dry.weather === null && dry.wet === false);
+  const dryGround = dry.sampleGround(dry.mainTrack.px[0], dry.mainTrack.pz[0]);
+  ok('…and its road is just a road', dryGround.surface === 'TARMAC', dryGround.surface);
+  dry.dispose();
+  w.dispose();
+}
+
+// -- authored ground ---------------------------------------------------------
+{
+  const w = await buildLevel('level5', { scatter: false });
+  // The lake: a pane at a fixed height over a basin the level dug for it.
+  const water = w.root.getObjectByName('water');
+  ok('bölüm 5 has water in it', !!water, water ? `at ${water.position.y}m` : 'none');
+  const bed = w.terrain.heightAt(20, 0);
+  ok('…and a hollow for it to sit in', bed < water.position.y - 8,
+    `bed ${bed.toFixed(1)}m, surface ${water.position.y}m`);
+  // …and the road is not in it.
+  const t = w.mainTrack;
+  let lowest = Infinity;
+  for (let i = 0; i < t.count; i++) lowest = Math.min(lowest, t.py[i]);
+  ok('…and the parkour stays out of the lake', lowest > water.position.y,
+    `lowest point of the road ${lowest.toFixed(1)}m`);
+  w.dispose();
 }
 
 function pointLineDistance(p, a, b) {

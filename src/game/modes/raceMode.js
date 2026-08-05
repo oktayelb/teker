@@ -53,7 +53,9 @@ class Progress {
   update(dt, time, query) {
     const v = this.vehicle;
     const t = this.track;
-    const q = t.query(v.position.x, v.position.z, query);
+    // Height included: where a track passes over itself, lap progress has to
+    // come from the deck the car is actually on. @see Track#query
+    const q = t.query(v.position.x, v.position.z, query, v.position.y);
 
     if (!q) {
       // Outside the track's spatial hash entirely — as far off as it gets.

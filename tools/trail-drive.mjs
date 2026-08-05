@@ -42,7 +42,10 @@ try {
     failures++;
     console.log('[PAGEERROR]', e.message);
   });
-  await page.goto(`http://localhost:${PORT}/index.html?scene=open`, { waitUntil: 'load' });
+  // `?level=1` on purpose: free roam now defaults to the level that breaks,
+  // and that one is in the rain — where a worn path is MUD rather than TRAIL
+  // (see `WET_SURFACE` in world.js), which is a different feature entirely.
+  await page.goto(`http://localhost:${PORT}/index.html?scene=open&level=1`, { waitUntil: 'load' });
   await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   await page.waitForFunction('TEKER.game.player != null', { timeout: 40000 });
   await sleep(600);

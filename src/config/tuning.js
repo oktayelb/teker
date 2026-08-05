@@ -243,6 +243,20 @@ export const SURFACES = {
    * surface grid. See the note there.
    */
   TRAIL: { id: 'TRAIL', grip: 0.82, drag: 1.15, power: 0.96, rumble: 0.22, dustColor: 0x7a6446 },
+  /**
+   * WET — tarmac in the rain. The whole point of a wet race.
+   *
+   * 0.72 is chosen against the corner, not against a feeling: a 90m radius
+   * turn needs about 15 m/s² to hold at 130 km/h, and this supplies roughly
+   * 11.5 — so the lines that work in the dry are a quarter too fast here and
+   * every one of them has to be taken slower rather than differently. Lower
+   * and a wet race becomes bölüm 3's clay, which is a different (and
+   * already-told) story about surfaces.
+   *
+   * The spray is the road's own water thrown up behind you, so it is pale and
+   * cold rather than the warm dust every other surface throws.
+   */
+  WET: { id: 'WET', grip: 0.72, drag: 1.08, power: 0.95, rumble: 0.06, dustColor: 0xb8c6cc },
   DIRT: { id: 'DIRT', grip: 0.74, drag: 1.25, power: 0.92, rumble: 0.35, dustColor: 0x8a7355 },
   GRASS: { id: 'GRASS', grip: 0.6, drag: 1.7, power: 0.8, rumble: 0.5, dustColor: 0x5f7a44 },
   MUD: { id: 'MUD', grip: 0.42, drag: 2.3, power: 0.68, rumble: 0.7, dustColor: 0x5b4a35 },

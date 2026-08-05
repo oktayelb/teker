@@ -21,6 +21,13 @@
 import level1 from './level1.js';
 import level2 from './level2.js';
 import level3 from './level3.js';
+import level4 from './level4.js';
+import level5 from './level5.js';
+import level6 from './level6.js';
+import level7 from './level7.js';
+import level8 from './level8.js';
+import level9 from './level9.js';
+import level10 from './level10.js';
 
 /**
  * Stamp each level with its position, so nothing has to be numbered by hand —
@@ -38,7 +45,7 @@ function order(levels) {
   return levels;
 }
 
-export const LEVELS = order([level1, level2, level3]);
+export const LEVELS = order([level1, level2, level3, level4, level5, level6, level7, level8, level9, level10]);
 
 /** Ids, in play order. */
 export const LEVEL_ORDER = LEVELS.map((l) => l.id);
@@ -49,12 +56,13 @@ export const FIRST_LEVEL = LEVELS[0].id;
 /**
  * The map free roam happens on.
  *
- * The last level, and not by coincidence: the story ends by leaving a race
- * somewhere, and the place the player is left is the place they are free in.
- * A boot that skips the story (`?skip=intro`, SERBEST SÜRÜŞ) drops them on the
- * same map they would have escaped onto, rather than on the tutorial oval.
+ * The level that breaks, and not by coincidence: the story ends by leaving a
+ * race somewhere, and the place the player is left is the place they are free
+ * in. A boot that skips the story (`?skip=intro`, SERBEST SÜRÜŞ) drops them on
+ * the same map they would have escaped onto, rather than on the tutorial oval
+ * — or, if no level claims the break, simply the last one.
  */
-export const FREE_ROAM_LEVEL = LEVELS[LEVELS.length - 1].id;
+export const FREE_ROAM_LEVEL = (LEVELS.find((l) => l.story?.breaks) || LEVELS[LEVELS.length - 1]).id;
 
 export function levelById(id) {
   return LEVELS.find((l) => l.id === id) || null;
@@ -85,4 +93,4 @@ export function nextLevel(id) {
   return i >= 0 ? LEVELS[i + 1] || null : null;
 }
 
-export { level1, level2, level3 };
+export { level1, level2, level3, level4, level5, level6, level7, level8, level9, level10 };

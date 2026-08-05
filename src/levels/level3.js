@@ -1,9 +1,7 @@
 /**
  * BÖLÜM 3 — "Sırt Yolu" (The Ridge Road)
  *
- * The one that breaks.
- *
- * Unlike the first two, this is not a road. It is an unsealed forest track:
+ * The first one that is not a road. It is an unsealed forest track:
  * packed dirt, no paint, no Armco. Its edges are marked with flexible plastic
  * delineator posts, and the only reason it is drivable at all is that somebody
  * rigged floodlights through the trees along it. `src/world/lighting.js` owns
@@ -17,21 +15,21 @@
  *   2. `lighting` — the rig. Note the `gaps`: the run through the deep cutting
  *      at 0.50–0.66 was never lit in the first place, which is why the darkness
  *      lands hardest exactly there.
- *   3. `patches` — SLICK, wet clay, through that same unlit stretch.
+ *   3. `patches` — MUD through that same unlit stretch, where the water off
+ *      the ridge crosses the road and nobody has graded it since.
  *
- * Halfway round, the lights fail. The director calls `lighting.blackout()`
- * (see `src/game/intro/introDirector.js`), the player's headlights come on, and
- * for a few seconds the only things in the world are two cones of light and a
- * dirt road that has stopped telling you where it goes. The clay does the rest.
+ * A RHYME, NOT A TRAP
+ * -------------------
+ * Everything here happens again on bölüm 8: an unsealed road, a rig with a hole
+ * in it, and a surface that gives up exactly where you cannot see. The
+ * difference is what the mud is worth. Here it costs you a place and the game
+ * puts you back on the road, because that is what the game does. There, it is
+ * clay instead of mud, it is raining, and nothing puts you back.
  *
- * WHAT IS OUT THERE
- * -----------------
- * This level's map, and nothing else. The player slides off the ribbon into a
- * forest that goes on for a kilometre in every direction and has one built
- * thing standing in it — the stage they just left, under glass. The parkours
- * from bölüm 1 and 2 are not over the next ridge; they are on their own maps,
- * and getting back to one is a journey the game has to *make*, not a drive.
- * See `src/game/levels.js`.
+ * The player is meant to arrive at bölüm 8 recognising the shape of it. That is
+ * the point of this level, and it is why the trap moved on rather than being
+ * copied: the first time you are told what happens when a road stops helping,
+ * and the second time nobody catches you.
  */
 
 import { defineLevel } from './defaults.js';
@@ -62,16 +60,9 @@ export default defineLevel({
    * patrols — happens in it.
    */
   map: {
-    seed: 0x3d17a9,
+    /** A ridge worth the name: the ground either side of this one falls away. */
+    seed: 0x1e77c4,
   },
-
-  /**
-   * The story staged over this level. Read only by `src/game/intro/`; every
-   * other reader treats this as a plain race, which is what makes the intro
-   * deletable. `breaks` says: the race on this level does not end. Do not
-   * queue anything after it.
-   */
-  story: { breaks: true },
 
   track: {
     loop: true,
@@ -140,31 +131,15 @@ export default defineLevel({
     },
 
     /**
-     * Wet clay through the cutting. Same grip as ice (0.12) — the corner at
-     * ~0.55 has a radius of about 115m and needs roughly 12 m/s² to hold; the
-     * clay can supply about 1.9. `runoff` continues it past the edge of the
-     * track so a car that runs wide does not find grip a metre later.
-     *
-     * If you retune the car, run `npm test` — the escape is asserted there.
+     * Run-off water across the unlit stretch. MUD rather than the clay that
+     * ends the game on bölüm 8: 0.42 of grip against 0.12. It will throw a car
+     * that arrives too fast well off the road — and then the road is still
+     * there, and so are you, which is the whole difference.
      */
     patches: [
-      { from: 0.5, to: 0.523, surface: 'MUD', runoff: 14 },
-      { from: 0.523, to: 0.612, surface: 'SLICK', runoff: 34 },
-      { from: 0.612, to: 0.655, surface: 'MUD', runoff: 14 },
+      { from: 0.5, to: 0.53, surface: 'MUD', runoff: 12 },
+      { from: 0.53, to: 0.62, surface: 'MUD', runoff: 22 },
+      { from: 0.62, to: 0.66, surface: 'MUD', runoff: 12 },
     ],
-
-    /**
-     * Read by the intro director. Everything outside `src/game/intro/` ignores
-     * these fields, so this is still a plain track without them.
-     */
-    breakout: {
-      /** Lap position where the lights are cut. Just before the cutting. */
-      blackoutAt: 0.44,
-      /** How long they stay out. Long enough to lose the road, not to get bored. */
-      blackoutSeconds: 9,
-      /** Where the escape is expected. */
-      at: 0.55,
-      side: 1,
-    },
   },
 });
