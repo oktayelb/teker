@@ -5,6 +5,12 @@
  * deliberately thin: a car, a world, and a camera. Everything that happens
  * *in* it (the sirens, the chase, the narrative) is attached from outside.
  *
+ * WHICH WORLD. The one the loaded level owns — free roam happens on a level's
+ * map, not on a separate open-world map, because there is no such thing here.
+ * Entering with `{ levelId }` goes and roams a different level's map (its map
+ * is loaded before this runs; see `ModeManager#prepare`), and entering with
+ * none stays where the player already is, which is what the breakout does.
+ *
  * SEAMLESS ENTRY
  * --------------
  * `enter({ keepPlayer: true })` adopts the car that is already driving instead
@@ -49,6 +55,9 @@ export class OpenWorldMode extends Mode {
 
   /**
    * @param {object} params
+   * @param {string} [params.levelId] roam a different level's map. Loading it
+   *   has already happened — and it invalidates `keepPlayer`, because the car
+   *   it would keep was standing on a world that no longer exists.
    * @param {boolean} [params.keepPlayer] adopt the existing player car
    * @param {{position: THREE.Vector3, heading: number}} [params.spawn]
    * @param {boolean} [params.keepRacers] leave AI cars lapping their track
@@ -96,11 +105,17 @@ export class OpenWorldMode extends Mode {
     events.emit('openWorld:entered', { keepPlayer: !!params.keepPlayer });
   }
 
+  /**
+   * On the grid of whatever parkour this map was built around.
+   *
+   * The one thing on a level's map that is guaranteed to exist and guaranteed
+   * to be somewhere you can stand a car — which is the whole requirement for a
+   * spawn that nobody authored.
+   */
   _defaultSpawn() {
-    const w = this.ctx.world;
-    const t = w.getTrack('track3') || w.tracks.values().next().value;
-    const slot = t.gridSlot(0, 7, 4.2, 14);
-    return slot;
+    const t = this.ctx.world.mainTrack;
+    if (!t) return { position: new THREE.Vector3(0, 0, 0), heading: 0 };
+    return t.gridSlot(0, 7, 4.2, 14);
   }
 
   /** Re-install AI on any non-player car so they keep going after the race. */
@@ -108,7 +123,8 @@ export class OpenWorldMode extends Mode {
     const g = this.ctx;
     for (const v of g.vehicles) {
       if (v === g.player) continue;
-      const track = g.world.onAnyTrack(v.position.x, v.position.z) || g.world.getTrack('track3');
+      const track = g.world.onAnyTrack(v.position.x, v.position.z) || g.world.mainTrack;
+      if (!track) continue;
       const ai = new AiDriver(v, { track, skill: 0.7, aggression: 0.5, seed: 7 + this._ghostRacers.length, world: g.world });
       g.setDriver(v, (_, dt) => ai.update(dt));
       this._ghostRacers.push({ vehicle: v, ai });
@@ -160,7 +176,7 @@ export class OpenWorldMode extends Mode {
   /** Quietly note where the player has been. The world is worth exploring. */
   _checkLandmarks() {
     const p = this.ctx.player;
-    const l = this.ctx.world.landmarkAt(p.position.x, p.position.z);
+    const l = this.ctx.world?.landmarkAt(p.position.x, p.position.z);
     if (!l || this.discovered.has(l.name)) return;
     this.discovered.add(l.name);
     l.discovered = true;

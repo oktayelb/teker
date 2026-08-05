@@ -47,6 +47,17 @@ try {
   await page.goto(`http://localhost:${PORT}/index.html?scene=open`, { waitUntil: 'load' });
   await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   await page.waitForFunction('TEKER.game.player != null', { timeout: 40000 });
+  // …and wait until the glass has actually SEEN the car under it. The latch is
+  // set on the first sync after a car appears (`DomeField#_stateFor`), and a
+  // car that is teleported out from under a dome before that first frame was,
+  // as far as the field is concerned, never under one — it seals silently and
+  // nothing is revealed. Which is correct, and is not what this tool is here to
+  // photograph. Under swiftshader one frame can be a couple of hundred
+  // milliseconds, so this waits for the fact rather than for a duration.
+  await page.waitForFunction(
+    'TEKER.game.world.domes._state.get(TEKER.game.player)?.inside > 0',
+    { timeout: 40000 }
+  );
 
   const shot = async (name) => {
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` });
@@ -73,7 +84,7 @@ try {
   const out = await page.evaluate(async () => {
     const g = TEKER.game;
     const f = g.world.domes;
-    const d = f.byId('track3');
+    const d = f.domes[0];
     const p = g.player;
     // Straight out past the rim, the way the escape carries you.
     const x = d.centerX + d.radius + 60;
@@ -97,7 +108,7 @@ try {
   const frameReveal = () =>
     page.evaluate(async () => {
       const g = TEKER.game;
-      const d = g.world.domes.byId('track3');
+      const d = g.world.domes.domes[0];
       const p = g.player;
       const V = Object.getPrototypeOf(p.position).constructor;
       const T = (await import('/src/game/intro/beats.js')).INTRO_TIMING;
@@ -122,7 +133,7 @@ try {
   console.log('\n— standing on it —');
   const roof = await page.evaluate(async () => {
     const g = TEKER.game;
-    const d = g.world.domes.byId('track3');
+    const d = g.world.domes.domes[0];
     const p = g.player;
     // Halfway up the flank, where a dome is both high and sloped.
     const x = d.centerX + d.radius * 0.45;
@@ -154,7 +165,7 @@ try {
   // Same spot, from up high, so the shape of the thing is in frame.
   await page.evaluate(() => {
     const g = TEKER.game;
-    const d = g.world.domes.byId('track3');
+    const d = g.world.domes.domes[0];
     const p = g.player;
     const V = Object.getPrototypeOf(p.position).constructor;
     g.camera.setStatic(new V(d.centerX + d.radius * 1.5, d.apex.y + 190, d.centerZ + d.radius * 1.5), d.apex);
@@ -168,7 +179,7 @@ try {
   console.log('\n— the reveal light —');
   await page.evaluate(() => {
     const g = TEKER.game;
-    const d = g.world.domes.byId('track3');
+    const d = g.world.domes.domes[0];
     const p = g.player;
     const V = Object.getPrototypeOf(p.position).constructor;
     g.setTheme('night', 0);
@@ -183,7 +194,7 @@ try {
   // …and from a long way off, which is how you find the other two.
   await page.evaluate(() => {
     const g = TEKER.game;
-    const d = g.world.domes.byId('track3');
+    const d = g.world.domes.domes[0];
     const V = Object.getPrototypeOf(g.player.position).constructor;
     g.camera.fovBias = 0;
     g.camera.setStatic(new V(d.centerX + d.radius + 320, d.apex.y + 40, d.centerZ), d.apex);
@@ -196,8 +207,8 @@ try {
   const under = await page.evaluate(() => {
     const g = TEKER.game;
     const f = g.world.domes;
-    const d = f.byId('track3');
-    const t = g.world.getTrack('track3');
+    const d = f.domes[0];
+    const t = g.world.mainTrack;
     const V = Object.getPrototypeOf(g.player.position).constructor;
     // A car standing where the race runs, that has never been outside.
     const probe = { position: new V(t.px[0], t.py[0], t.pz[0]), isPlayer: false };

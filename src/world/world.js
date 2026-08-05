@@ -1,15 +1,29 @@
 /**
- * WORLD — one terrain, three parkours, a forest, and everything in between.
+ * WORLD — one terrain, the parkour standing on it, a forest, and everything in
+ * between.
  *
  * THE IMPORTANT DECISION IN THIS FILE
  * -----------------------------------
- * All three tracks are built into the *same* terrain, at the same time, once.
- * A race does not load a track; it points the rules at one of the ribbons that
- * were always there. That costs a little more memory and buys the entire
- * premise of the game: when the player leaves the third parkour, the first two
- * are still standing a few hundred metres away, and they can drive back to them
- * and look at the start line they were on ten minutes ago. Nothing is streamed
- * in behind them, because nothing was ever streamed in.
+ * A World is ONE LEVEL'S MAP. It is built whole — terrain, ribbons, glass,
+ * forest, landmarks, worn routes — and when the player leaves that level it is
+ * disposed and the next level's map is built in its place. Two levels never
+ * share ground and never exist at the same time. `src/game/levels.js` owns that
+ * swap; this file knows nothing about it beyond being buildable and disposable.
+ *
+ * What that buys: a level is a place. Its parkour sits in the middle of its own
+ * valley with a kilometre of forest around it, and the ground beyond the
+ * barriers is genuinely somewhere — not the gap between two other levels'
+ * parkours. What it costs: getting from one level to another is a build, behind
+ * a loading screen, rather than a drive.
+ *
+ * Nothing here is streamed. Within a level, everything you can reach was there
+ * before you arrived and is still there when you drive away from it.
+ *
+ * WHAT A LEVEL GETS TO CHOOSE. `spec` (see `_resolveSpec`) is the level's map
+ * definition: its seed, how big and how finely the terrain is built, how thick
+ * the forest is, where its landmarks are, whether it has worn routes and
+ * whether its parkour is under glass. Build a World without one and you get the
+ * defaults out of `OPEN_WORLD`, which is what the headless tests do.
  *
  * The World is also the physics environment. It answers two questions for any
  * vehicle: what is the ground here, and did I just hit something.
@@ -34,7 +48,10 @@ import { events } from '../core/events.js';
 const _normal = new THREE.Vector3();
 
 /**
- * Points of interest, as data.
+ * Points of interest, as data — the DEFAULT set, which every level gets unless
+ * it names its own (`level.map.landmarks`, see `src/levels/defaults.js`, which
+ * also rotates these by the level's seed so the lake is not in the same place
+ * on every map).
  *
  * Polar rather than cartesian so they survive a change of world radius, and
  * module-scope rather than inline because the trail network needs to know
@@ -62,13 +79,17 @@ export class World {
    * @param {object} opts
    * @param {import('../render/materials.js').MaterialLibrary} opts.materials
    * @param {object} opts.theme resolved theme
-   * @param {number} [opts.seed]
+   * @param {object} [opts.spec] the level's map definition — see `_resolveSpec`
+   * @param {number} [opts.seed] overrides `spec.seed` (the `?seed=` boot option)
    */
-  constructor({ materials, theme, seed = OPEN_WORLD.seed, lightPool = null }) {
+  constructor({ materials, theme, seed = null, lightPool = null, spec = null }) {
     this.materials = materials;
     this.lightPool = lightPool;
     this.theme = theme;
-    this.seed = seed;
+    /** @type {object} the resolved map definition this world was built from */
+    this.spec = this._resolveSpec(spec);
+    if (seed != null) this.spec.seed = seed;
+    this.seed = this.spec.seed;
 
     this.root = new THREE.Group();
     this.root.name = 'world';
@@ -105,8 +126,48 @@ export class World {
     this._built = false;
   }
 
+  /**
+   * A level's map definition, with every default filled in.
+   *
+   * The defaults are exactly what the game shipped with before levels had maps
+   * of their own, so `new World({ materials, theme })` still builds the world
+   * this file used to build — which is what the headless tests rely on.
+   *
+   * @param {object|null} spec `level.map`; see `src/levels/defaults.js`
+   */
+  _resolveSpec(spec) {
+    const s = spec || {};
+    return {
+      seed: s.seed ?? OPEN_WORLD.seed,
+      terrain: {
+        resolution: s.terrain?.resolution ?? OPEN_WORLD.terrainResolution,
+        cellSize: s.terrain?.cellSize ?? OPEN_WORLD.terrainCellSize,
+      },
+      /** Per-kind counts. A level may thin its forest, or thicken it. */
+      scatter: { ...OPEN_WORLD.scatterDensity, ...(s.scatter || {}) },
+      /** …or scale the lot with one number. */
+      density: s.density ?? 1,
+      landmarks: s.landmarks || LANDMARK_DEFS,
+      /** `false` for a map with nobody's ruts in it. */
+      trails: s.trails === false ? null : { ...OPEN_WORLD.trails, ...(s.trails === true ? {} : s.trails || {}) },
+      domes: s.domes !== false,
+    };
+  }
+
   get halfSpan() {
     return this.terrain?.halfSpan ?? 0;
+  }
+
+  /**
+   * The parkour this map was built around.
+   *
+   * A level has one map and, nearly always, one ribbon on it — so "the track",
+   * unqualified, is a question with an answer, and callers that used to name
+   * `'track3'` can ask the world instead. See `src/levels/defaults.js`.
+   * @type {Track|null}
+   */
+  get mainTrack() {
+    return this._trackList[0] || null;
   }
 
   /**
@@ -126,8 +187,8 @@ export class World {
 
     await step('terrain', 0.05, () => {
       this.terrain = new Terrain({
-        resolution: OPEN_WORLD.terrainResolution,
-        cellSize: OPEN_WORLD.terrainCellSize,
+        resolution: this.spec.terrain.resolution,
+        cellSize: this.spec.terrain.cellSize,
         seed: this.seed,
       });
     });
@@ -154,15 +215,17 @@ export class World {
     // Only positions are needed here, which is why `LANDMARK_DEFS` is data at
     // module scope and `_placeLandmarks` (which wants heights) can stay late.
     await step('trails', 0.42, () => {
+      if (!this.spec.trails) return;
       const span = this.terrain.halfSpan;
       this.trails = new Trails({
         halfSpan: span,
-        landmarks: LANDMARK_DEFS.map((d) => ({
+        landmarks: this.spec.landmarks.map((d) => ({
           x: Math.cos(d.angle) * span * d.dist,
           z: Math.sin(d.angle) * span * d.dist,
         })),
         tracks: this._trackList,
         seed: this.seed,
+        cfg: this.spec.trails,
       });
       this.terrain.painter = this.trails.painter(this.theme);
     });
@@ -188,6 +251,7 @@ export class World {
     // The glass. Built now, with the tracks it belongs to and the terrain it is
     // anchored to, and then nothing happens to it for the whole of the story.
     await step('domes', 0.68, () => {
+      if (!this.spec.domes) return;
       this.domes = new DomeField({ tracks: this._trackList, terrain: this.terrain });
       this.root.add(this.domes.build(this.materials, this.theme));
     });
@@ -246,7 +310,7 @@ export class World {
    * @returns {(x:number, z:number)=>boolean} true = do not place here
    */
   _trailAvoidance() {
-    const worn = OPEN_WORLD.trails.clearAbove;
+    const worn = this.spec.trails?.clearAbove ?? OPEN_WORLD.trails.clearAbove;
     return (x, z) => this.trails != null && this.trails.strengthAt(x, z) > worn;
   }
 
@@ -346,7 +410,12 @@ export class World {
     const skewered = this.domes ? this.domes.skewerAvoidance(this.terrain) : () => false;
     const avoidTrees = (x, z) => avoidUsed(x, z) || skewered(x, z);
 
-    const D = OPEN_WORLD.scatterDensity;
+    // The level's own forest. `density` scales every count at once, so a map
+    // that wants thinner woods is one number rather than eight.
+    const k = this.spec.density;
+    const raw = this.spec.scatter;
+    const D = {};
+    for (const key of Object.keys(raw)) D[key] = Math.round(raw[key] * k);
     const span = this.terrain.halfSpan;
     s.place({ kind: 'pine', count: Math.round(D.trees * 0.62), region: { radius: span * 0.97 }, avoid: avoidTrees });
     s.place({ kind: 'broadleaf', count: Math.round(D.trees * 0.28), region: { radius: span * 0.9 }, avoid: avoidTrees });
@@ -386,7 +455,7 @@ export class World {
    */
   _placeLandmarks() {
     const span = this.terrain.halfSpan;
-    for (const d of LANDMARK_DEFS) {
+    for (const d of this.spec.landmarks) {
       const x = Math.cos(d.angle) * span * d.dist;
       const z = Math.sin(d.angle) * span * d.dist;
       this.landmarks.push({
@@ -489,7 +558,7 @@ export class World {
     if (
       this.trails &&
       (surface === 'GRASS' || surface === 'DIRT') &&
-      this.trails.strengthAt(x, z) > OPEN_WORLD.trails.driveAbove
+      this.trails.strengthAt(x, z) > this.trails.cfg.driveAbove
     ) {
       surface = 'TRAIL';
     }
@@ -590,7 +659,9 @@ export class World {
     return null;
   }
 
-  getTrack(id) {
+  /** By id, or — with no id — the ribbon this map was built around. */
+  getTrack(id = null) {
+    if (id == null) return this.mainTrack;
     return this.tracks.get(id) || null;
   }
 
@@ -601,17 +672,19 @@ export class World {
 
   /** Show or hide a track's furniture — used to strip the barriers away. */
   setTrackVisible(id, visible) {
-    const g = this._trackGroups.get(id);
+    const g = this._trackGroups.get(id ?? this.mainTrack?.id);
     if (g) g.visible = visible;
   }
 
   /**
    * Remove a track's barriers from the collision world.
-   * The third parkour uses this the moment the game stops pretending.
+   * The parkour that breaks uses this the moment the game stops pretending.
+   * Omit the id and it means this map's own ribbon.
    */
   setBarriersEnabled(trackId, enabled) {
-    const t = this.tracks.get(trackId);
+    const t = trackId == null ? this.mainTrack : this.tracks.get(trackId);
     if (!t) return;
+    trackId = t.id;
     for (const c of t.colliders) c.disabled = !enabled;
     const g = this._trackGroups.get(trackId);
     const mesh = g?.getObjectByName('barriers');

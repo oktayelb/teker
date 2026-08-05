@@ -51,7 +51,7 @@ try {
     });
     /** Park the player `m` metres past the ribbon edge and hold it there. */
     window.__park = (m) => {
-      const t = TEKER.game.world.getTrack('track3');
+      const t = TEKER.game.world.mainTrack;
       const v = TEKER.game.player;
       const q = t.query(v.position.x, v.position.z, {});
       const i = q ? q.index : t.startLine.sample;

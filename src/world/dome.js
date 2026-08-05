@@ -90,6 +90,7 @@ export class Dome {
     /** Shell height per lattice vertex, ring-major. See `heightAt`. */
     this._shell = new Float32Array((this.rings + 1) * this.segments);
     this._sampleShell(terrain);
+    this._clearTheRoad(track, terrain);
 
     /** Where the camera looks when this one is revealed. */
     this.apex = new THREE.Vector3(this.centerX, this._shell[0], this.centerZ);
@@ -157,12 +158,50 @@ export class Dome {
     for (let i = 0; i <= rings; i++) {
       const u = i / rings;
       const p = this._profile(u);
-      const toRaw = u * u * u;
+      const toRaw = Math.pow(u, this.cfg.rimBlend ?? 5);
       for (let j = 0; j < segs; j++) {
         const k = i * segs + j;
         const ground = base[k] + (raw[k] - base[k]) * toRaw;
         this._shell[k] = ground - bite + lift * p;
       }
+    }
+  }
+
+  /**
+   * Raise the shell until there is genuinely a roof over the racing line.
+   *
+   * WHY THIS IS NOT LEFT TO THE AUTHOR. A dome's height is derived from its
+   * footprint (`radius * heightFactor`), and its footprint is derived from the
+   * ribbon — but the *clearance* over the road is neither, because the shell is
+   * anchored to ground that rolls and a loop parkour runs near the edge of its
+   * own footprint, which is the lowest part of the shell. So a level whose
+   * stage climbs thirty metres and sits on a rise can end up with nine metres
+   * of glass over the racing line, and the pines out here are thirteen: trees
+   * grow through the roof, and the roof is a ceiling the player can hit.
+   *
+   * Left as a rule about seeds ("try another one until it looks right") this
+   * would be a trap laid for every level anybody adds next. So the dome simply
+   * measures itself against the road it covers and lifts until it clears —
+   * a handful of resamples at build time, once, and never a surprise.
+   *
+   * Iterated rather than solved because the profile is not linear in height at
+   * the point of worst clearance: raising the apex raises that point by
+   * `profile(u)` of the lift, and u there is whatever it is.
+   */
+  _clearTheRoad(track, terrain) {
+    const want = this.cfg.roadClearance ?? 0;
+    if (!want || !track?.count) return;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      let worst = Infinity;
+      for (let i = 0; i < track.count; i++) {
+        const gap = this.heightAt(track.px[i], track.pz[i]) - track.py[i];
+        if (gap < worst) worst = gap;
+      }
+      if (worst >= want || !Number.isFinite(worst)) return;
+      // Overshoot slightly: the lift arrives at the road multiplied by the
+      // profile there, which is always less than one.
+      this.height += (want - worst) * 1.35 + 0.5;
+      this._sampleShell(terrain);
     }
   }
 

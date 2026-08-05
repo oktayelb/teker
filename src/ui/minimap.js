@@ -269,6 +269,11 @@ export class Minimap {
     this._trackLines.length = 0;
     this._landmarks.length = 0;
     this._indexed = false;
+    // `setWorld(null)` is a real call, not a defensive one: between two levels
+    // there is genuinely no map (see `src/game/levels.js`), and a stale edge
+    // ring drawn at the last world's radius would be the map claiming to know
+    // where the edge of somewhere is while that somewhere is being built.
+    this._worldRadius = 0;
     // Indexing a world nobody will draw is the one cost a disabled map could
     // still impose, so it does not.
     if (!world || !MINIMAP.enabled) return this;

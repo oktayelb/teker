@@ -117,6 +117,29 @@ export const DOME = {
   /** Apex height as a fraction of the footprint radius. */
   heightFactor: 0.2,
   /**
+   * Metres of glass that must stand over the racing line, everywhere on it.
+   *
+   * The derived height above is a shape rule, not a clearance guarantee: a
+   * stage that climbs a rise can sit close under its own roof even though the
+   * apex is sixty metres up. A dome measures itself against the ribbon it
+   * covers and lifts until it clears this — see `Dome#_clearTheRoad`. Comfortably
+   * over the tallest pine (13m), because trees stand next to the road too.
+   */
+  roadClearance: 18,
+  /**
+   * How hard the shell snaps back to the raw terrain as it approaches the rim,
+   * as an exponent on u (the fraction of the way out).
+   *
+   * The blur that keeps a dome a dome (see `basePasses`) is faded out toward
+   * the rim so the glass meets the earth where the earth actually is. How fast
+   * decides how much hillside the flanks inherit — and the flanks are what a
+   * player drives up. At the cube it used to be, one percent of the roof stood
+   * at 34–44°, which is a wall you meet at speed; at the fifth power the same
+   * percentile is 30° and the worst point on any dome is 37°. The rim is still
+   * anchored, because u⁵ is still 1 at the rim.
+   */
+  rimBlend: 5,
+  /**
    * Shape of the shell: `height * (1 - u²)^exponent`, u = radius fraction.
    *
    * ONE is not a placeholder — it is a paraboloid, the flattest shape that still
@@ -544,6 +567,16 @@ export const OPEN_WORLD = {
     /** Metres a route may wander off the straight line between its ends. */
     wander: 90,
     /**
+     * …and how far it MUST, as a fraction of its own length.
+     *
+     * The floor matters more than the ceiling. Every level's parkour sits in
+     * the middle of its own map now, so a landmark route runs most of a
+     * kilometre — and a kilometre of straight line is a survey marking, not a
+     * path somebody wore. See `Trails#_route`, which rescales any route the
+     * dice came out flat on. `npm test` asserts none of them is a ruler line.
+     */
+    minWander: 0.05,
+    /**
      * Routes between landmarks, as index pairs into `LANDMARK_DEFS`. Every
      * landmark already gets a route down to the nearest parkour; these are the
      * few that also connect to each other, and there are deliberately not many.
@@ -581,9 +614,19 @@ export const OPEN_WORLD = {
     /**
      * Along-route patchiness: below this the route has grown over completely.
      * Without it a trail is a stripe of uniform brown, which reads as painted.
+     *
+     * The pair was shifted down by 0.04 when every level moved onto its own
+     * map. Nothing about the noise changed; the routes did. A landmark route
+     * used to run a few hundred metres to whichever of three parkours was
+     * nearest, and now it runs most of a kilometre to the only one there is —
+     * so the same patchiness cut the drivable stretches into pieces too short
+     * to follow, and a path you lose every eighty metres is not a path. At
+     * these values a little over half of a route's length drives as `TRAIL`
+     * and the rest has grown back over, which is the intended reading: you
+     * catch a trail in stretches. `npm test` measures it on every level.
      */
-    fadeFrom: 0.3,
-    fadeTo: 0.62,
+    fadeFrom: 0.26,
+    fadeTo: 0.58,
     /** Grid cells per noise cycle for that patchiness. */
     fadeScale: 0.0075,
     /**
@@ -860,6 +903,12 @@ export function readBootOptions(search = globalThis.location?.search || '') {
      * breakout, the sirens and the chase all still happen.
      */
     start: q.get('start') || null,
+    /**
+     * Which level's map to boot into: an id (`?level=level2`) or its number
+     * (`?level=2`). Resolved in `src/levels/index.js` — this file deliberately
+     * does not know what levels exist.
+     */
+    level: q.get('level') || null,
     skipIntro: skip === 'intro' || skip === '1' || skip === 'true' || DEBUG.skipIntro,
     theme: q.get('theme') || null,
     renderPreset: q.get('render') || null,

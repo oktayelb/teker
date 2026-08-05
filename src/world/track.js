@@ -1,15 +1,15 @@
 /**
- * TRACK — turns a plain data file (`src/world/tracks/*.js`) into a drivable
- * parkour: a resampled centreline, road geometry, checkpoints, a starting grid,
- * barriers, and the queries the rest of the game needs.
+ * TRACK — turns a plain data file (a level's `track` block, `src/levels/*.js`)
+ * into a drivable parkour: a resampled centreline, road geometry, checkpoints,
+ * a starting grid, barriers, and the queries the rest of the game needs.
  *
  * Nothing here knows about racing rules. It answers questions:
  *   "where is the road nearest this point, how wide is it, and what is it
  *    made of?"  Race mode and the intro director do the interpreting.
  *
- * The third parkour's escape route is not a special case in this file. It is a
- * `patches` entry that makes a corner slippery and a `gaps` entry that leaves
- * the barrier out. The world is simply built with a hole in it.
+ * The escape route on the parkour that breaks is not a special case in this
+ * file. It is a `patches` entry that makes a corner slippery and a `gaps` entry
+ * that leaves the barrier out. The world is simply built with a hole in it.
  */
 
 import * as THREE from 'three';

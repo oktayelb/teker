@@ -7,7 +7,8 @@
  *
  *   ?skip=intro          straight to free roam
  *   ?start=race3         story, but starting at the parkour that breaks
- *   ?scene=race1|race2|race3|open|chase   one situation, no director
+ *   ?level=level2        which level's map to boot into (also `?level=2`)
+ *   ?scene=race1..raceN|open|chase   one situation, no director
  *   ?cam=chase|hood|bumper|chaseWide|cinematic|free
  *   ?theme=forest|outside|night|glitch
  *   ?render=psx|n64|clean
@@ -18,19 +19,28 @@ import { Game } from './game/game.js';
 import { RaceMode } from './game/modes/raceMode.js';
 import { OpenWorldMode } from './game/modes/openWorldMode.js';
 import { readBootOptions } from './config/gameplay.js';
+import { LEVELS, FREE_ROAM_LEVEL } from './levels/index.js';
 import { events } from './core/events.js';
 import { ui } from './ui/index.js';
 
 // The one intro import in the entire codebase.
 import { IntroDirector } from './game/intro/introDirector.js';
 
+/**
+ * Direct scene boots, generated from the level list rather than written out:
+ * `?scene=race4` exists the moment a fourth level does, and nobody has to
+ * remember this file when they add one.
+ */
 const SCENES = {
-  race1: { mode: 'race', params: { trackId: 'track1' } },
-  race2: { mode: 'race', params: { trackId: 'track2' } },
-  race3: { mode: 'race', params: { trackId: 'track3' } },
-  open: { mode: 'openWorld', params: { rig: 'chaseWide' } },
-  chase: { mode: 'openWorld', params: { rig: 'chaseTight', startChase: true } },
+  // Free roam is the last level's map, the same one the story would have left
+  // the player on — see `FREE_ROAM_LEVEL`. `?level=` overrides it below.
+  open: { mode: 'openWorld', params: { levelId: FREE_ROAM_LEVEL, rig: 'chaseWide' } },
+  chase: { mode: 'openWorld', params: { levelId: FREE_ROAM_LEVEL, rig: 'chaseTight', startChase: true } },
 };
+for (const level of LEVELS) {
+  SCENES[`race${level.index}`] = { mode: 'race', params: { levelId: level.id } };
+  SCENES[level.id] = { mode: 'race', params: { levelId: level.id } };
+}
 
 async function boot() {
   const canvas = document.getElementById('game-canvas');
@@ -60,7 +70,7 @@ async function boot() {
   if (options.scene && SCENES[options.scene]) {
     const s = SCENES[options.scene];
     game.setTheme(options.theme || (options.scene === 'chase' ? 'night' : 'forest'), 0);
-    await game.modes.switchTo(s.mode, s.params);
+    await game.modes.switchTo(s.mode, { ...s.params, levelId: options.level || s.params.levelId });
     if (s.params.startChase) game.modes.current?.startChase?.({});
     return;
   }
@@ -70,7 +80,12 @@ async function boot() {
     game.flags.escaped = true;
     game.setTheme(options.theme || 'outside', 0);
     game.audio.setAmbience('outside');
-    await game.modes.switchTo('openWorld', { rig: 'chaseWide' });
+    // Free roam is a level's map like everything else — the last one, unless
+    // `?level=` said otherwise. See `FREE_ROAM_LEVEL`.
+    await game.modes.switchTo('openWorld', {
+      levelId: options.level || FREE_ROAM_LEVEL,
+      rig: 'chaseWide',
+    });
     // The glass over the parkours is part of the world once the story is over,
     // and there is nobody here to reveal it dramatically.
     game.world.revealDomes();

@@ -359,7 +359,7 @@ try {
     // Stand on open tarmac. Scatter is kept clear of the tracks, so this is the
     // one place we can be sure the occlusion raycast is not doing the hiding
     // for us — otherwise "the cop cannot see you" proves nothing about trees.
-    const t = g.world.getTrack('track1');
+    const t = g.world.mainTrack;
     const i = t.startLine.sample;
     v.reset(new v.position.constructor(t.px[i], t.py[i] + 0.6, t.pz[i]), Math.atan2(t.tx[i], t.tz[i]));
 

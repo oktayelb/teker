@@ -7,8 +7,12 @@
  *      stays open until the player presses ENTER.
  *   2. The countdown never runs behind the fade. When the new grid appears the
  *      race must still be on the grid, not already racing.
- *   3. `?start=race3` boots the story straight into parkur 3 with the director
+ *   3. `?start=race3` boots the story straight into bölüm 3 with the director
  *      still attached, so the blackout and everything after it still happen.
+ *
+ * Every level owns its map now, so 1 and 2 are also checks that a level swap
+ * (a whole world built behind the fade) does not leak into what the player
+ * sees: no countdown behind the curtain, no results panel skipped past.
  *
  *   node tools/race-flow.mjs
  */
@@ -45,8 +49,8 @@ async function open(query = '') {
   await page.waitForFunction('globalThis.TEKER?.game?.loop?.running === true', { timeout: 60000 });
   await page.evaluate(() => {
     window.__log = [];
-    for (const ev of ['race:started', 'race:finished', 'race:dismissed', 'mode:entered', 'intro:phase'])
-      TEKER.events.on(ev, (p) => window.__log.push(`${ev}:${p?.trackId || p?.name || p?.phase || ''}`));
+    for (const ev of ['race:started', 'race:finished', 'race:dismissed', 'mode:entered', 'intro:phase', 'level:loaded'])
+      TEKER.events.on(ev, (p) => window.__log.push(`${ev}:${p?.levelId || p?.id || p?.name || p?.phase || ''}`));
   });
   return page;
 }
@@ -85,7 +89,7 @@ try {
   const title = await page.evaluate(() =>
     [...document.querySelectorAll('.tk-menu .tk-btn')].map((b) => b.dataset.id)
   );
-  check('title menu offers a race-3 shortcut', title.includes('race3'), title.join(','));
+  check('title menu offers a shortcut to the level that breaks', title.includes('level3'), title.join(','));
 
   await page.keyboard.press('Enter'); // BAŞLA
   // The grid is held for gridHold before the lights: catch it mid-hold.
@@ -111,7 +115,7 @@ try {
   // THE POINT: sit here doing nothing for a long time. Nothing may advance.
   await sleep(9000);
   s = await probe(page);
-  check('9s with no input: still on track1, panel still up', s.track === 'track1' && s.open.includes('dim'),
+  check('9s with no input: still on bölüm 1, panel still up', s.track === 'level1' && s.open.includes('dim'),
     `track=${s.track} open=${s.open}`);
   check('race:dismissed not emitted before ENTER', !s.log.includes('race:dismissed'), s.log);
 
@@ -122,7 +126,7 @@ try {
   check('ENTER closes the panel', !s.open.includes('dim'), s.open);
 
   // Through the gap: black screen, then the new grid, then the lights.
-  await page.waitForFunction('TEKER.game.modes.current?.track?.id === "track2"', { timeout: 25000 });
+  await page.waitForFunction('TEKER.game.modes.current?.track?.id === "level2"', { timeout: 25000 });
   s = await probe(page);
   check('race 2 grid is NOT already racing when it appears', s.state !== 'racing', s.state);
 
@@ -150,10 +154,10 @@ try {
 }
 
 async function page3Checks(p3) {
-  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "track3"', { timeout: 30000 });
+  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "level3"', { timeout: 30000 });
   let s = await probe(p3);
-  check('no title screen — straight into parkur 3', !s.open.includes('scrim'), s.open);
-  check('on track3', s.track === 'track3', String(s.track));
+  check('no title screen — straight into bölüm 3', !s.open.includes('scrim'), s.open);
+  check('on level3', s.track === 'level3', String(s.track));
 
   await p3.waitForFunction(
     'Number(getComputedStyle(document.querySelector(".tk-fade")).opacity) < 0.05',

@@ -16,9 +16,18 @@
  * `main.js` boots straight into free-roam with everything intact.
  *
  * WHAT IT STAGES
- *   race 1 → race 2 → race 3 → the slide → the failed reset → the open world
- *   → thirty seconds of quiet → sirens → two cars → the escape → alone.
+ *   every level in `src/levels/`, in order, until one of them says it breaks
+ *   → the slide → the failed reset → the open world → thirty seconds of quiet
+ *   → sirens → two cars → the escape → alone.
  * Then it detaches itself and the game is yours.
+ *
+ * IT DOES NOT HOLD A LIST OF RACES. It walks `LEVELS`, and a level that
+ * carries `story.breaks` is the one the game stops pretending on. Adding a
+ * fourth level puts a fourth race in the opening without this file changing;
+ * moving the break is moving one flag in a level file. The only thing here that
+ * is still per-level is the *writing* — subtitle beats, looked up by convention
+ * as `<levelId>.pre` and `<levelId>.post`, and simply absent (and silent) for a
+ * level nobody has written lines for yet. See `beats.js`.
  */
 
 import * as THREE from 'three';
@@ -27,10 +36,15 @@ import { RaceMode } from '../modes/raceMode.js';
 import { OpenWorldMode } from '../modes/openWorldMode.js';
 import { BEATS, INTRO_TIMING as T, getBeat } from './beats.js';
 import { BREAKOUT, OPEN_WORLD, RACE } from '../../config/gameplay.js';
-import { RACE_ORDER, trackById } from '../../world/tracks/index.js';
+import { LEVELS, FREE_ROAM_LEVEL, resolveLevel } from '../../levels/index.js';
 import { clamp01, lerp } from '../../core/mathx.js';
 
-const PHASES = ['boot', 'title', 'race1', 'race2', 'race3', 'breakout', 'free', 'siren', 'chase', 'after', 'done'];
+/**
+ * `race` is one phase however many levels there are; which level it is racing
+ * lives in `this.level`. A phase per level would mean editing this list every
+ * time somebody adds one, which is exactly the tangle levels are meant to end.
+ */
+const PHASES = ['boot', 'title', 'race', 'breakout', 'free', 'siren', 'chase', 'after', 'done'];
 
 export class IntroDirector {
   /** @param {import('../game.js').Game} game */
@@ -38,6 +52,8 @@ export class IntroDirector {
     this.game = game;
     this.subs = new Subscriptions();
     this.phase = 'boot';
+    /** @type {object|null} the level being raced during the `race` phase. */
+    this.level = null;
     this.attached = false;
 
     this._timers = [];
@@ -99,7 +115,7 @@ export class IntroDirector {
     this._phaseTime += dt;
 
     switch (this.phase) {
-      case 'race3':
+      case 'race':
         this._watchForBlackout(dt);
         break;
       case 'free':
@@ -126,12 +142,17 @@ export class IntroDirector {
     // No lap counter over the title — nothing has started yet.
     g.ui.hud.setMode('none');
 
-    // Park a car on the first grid so the title screen has something to look at.
-    const t1 = g.world.getTrack('track1');
-    const slot = t1.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap, RACE.poleGap);
+    // Park a car on the first grid so the title screen has something to look
+    // at. Whatever the first level is, the game has already built its map.
+    const first = g.world.mainTrack;
+    const slot = first.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap, RACE.poleGap);
     const showcase = g.spawnVehicle({ kind: 'player', color: g.theme.vehicles.player, id: 'showcase' });
     showcase.reset(slot.position, slot.heading);
     g.camera.setTarget(showcase);
+
+    // The stage that breaks, named for the menu. `?start=` and the menu item
+    // below both use its id, so neither has a number written into it.
+    const breaking = LEVELS.find((l) => l.story?.breaks) || LEVELS[LEVELS.length - 1];
 
     // Pass the menu explicitly rather than relying on the UI's defaults — the
     // ids below are the director's contract with the title screen.
@@ -139,10 +160,10 @@ export class IntroDirector {
     if (!action) {
       this._play('title.tagline');
       action = await g.ui.screens.showTitle({
-        tagline: 'Üç parkur · Orman devresi',
+        tagline: `${LEVELS.length} parkur · Orman devresi`,
         items: [
           { id: 'start', label: 'BAŞLA' },
-          { id: 'race3', label: 'PARKUR 3’TEN BAŞLA' },
+          { id: breaking.id, label: `BÖLÜM ${breaking.index}’TEN BAŞLA` },
           { id: 'freeRoam', label: 'SERBEST SÜRÜŞ' },
         ],
       });
@@ -154,51 +175,63 @@ export class IntroDirector {
       return;
     }
 
-    // Straight to the stage that breaks — the one worth testing repeatedly.
-    // Everything downstream (blackout, breakout, sirens, chase) is unchanged;
-    // only the two warm-up races are skipped.
-    if (action === 'race3') {
-      g.flags.racesCompleted = 2;
-      await this._runRace('track3', 'race3', 'race3.pre', null);
-      return;
-    }
+    // Start part-way in. `?start=level3` / `?start=3` / the menu item all mean
+    // "skip the warm-up races and keep everything downstream" — the blackout,
+    // the breakout, the sirens and the chase are unchanged.
+    const from = action === 'start' ? null : resolveLevel(action) || resolveLevel(String(action).replace(/^race/, ''));
+    const queue = from ? LEVELS.slice(LEVELS.indexOf(from)) : LEVELS;
+    if (from) g.flags.racesCompleted = LEVELS.indexOf(from);
 
-    // Race 1 alone does not fade: the title screen is already parked on this
-    // grid, so cutting to it reads as the camera settling, not as a load.
-    await this._runRace('track1', 'race1', 'race1.pre', 'race1.post', {
-      fade: false,
-      nextLabel: 'SONRAKİ YARIŞ',
-    });
-    await this._runRace('track2', 'race2', 'race2.pre', 'race2.post', {
-      nextLabel: 'SONRAKİ YARIŞ',
-    });
-    await this._runRace('track3', 'race3', 'race3.pre', null);
-    // Race 3 does not end. `_onOffCourse` takes it from here.
+    for (let i = 0; i < queue.length; i++) {
+      const level = queue[i];
+      const last = level.story?.breaks || i === queue.length - 1;
+      await this._runRace(level, {
+        // A race on the map that is ALREADY standing does not fade: the title
+        // screen is parked on that very grid, so cutting to it reads as the
+        // camera settling rather than as a load. Every other one crosses to a
+        // map that has to be built, and the black is what it is built behind.
+        fade: level.id !== g.levels.currentId,
+        nextLabel: last ? undefined : 'SONRAKİ YARIŞ',
+      });
+      // A level that breaks never resolves: `_onOffCourse` takes the story
+      // from here, and nothing after this loop runs.
+      if (level.story?.breaks) return;
+    }
   }
 
   /**
-   * One race, start to finish, at the pace of a person rather than a loader.
+   * One level, start to finish, at the pace of a person rather than a loader.
    *
-   *   fade to black → build the grid → fade in → name the parkour → hold →
-   *   3·2·1·GO → [the race] → the finish breathes → results, waiting on ENTER →
-   *   the closing line → hold → the next one.
+   *   fade to black → build the level's map → fade in → name the parkour →
+   *   hold → 3·2·1·GO → [the race] → the finish breathes → results, waiting on
+   *   ENTER → the closing line → hold → the next one.
    *
    * Every one of those steps is a wait the player can feel. Cutting straight
    * from a finish line to the next countdown is what made three races read as
    * one long menu.
+   *
+   * THE BLACK IS ALSO THE LOAD. Each level owns a map, so the swap between two
+   * races is a world being built (see `src/game/levels.js`) — which is why the
+   * fade goes out before `switchTo` and only comes back after it. The loading
+   * panel the host raises lives behind that curtain.
+   *
+   * @param {object} level a resolved level from `src/levels/`
    */
-  async _runRace(trackId, phase, preBeat, postBeat, { fade = true, nextLabel } = {}) {
+  async _runRace(level, { fade = true, nextLabel } = {}) {
     const g = this.game;
-    this._setPhase(phase);
+    this._setPhase('race');
+    this.level = level;
     this._raceResolved = null;
+    this._blackoutDone = false;
 
-    // Black over the swap. Loading a grid in full view of the player is the
+    // Black over the swap. Building a grid in full view of the player is the
     // one moment the illusion of a continuous place is cheapest to break.
     if (fade) await g.ui.screens.fadeTo('#05070a', T.raceFadeOut);
     await g.modes.switchTo('race', {
-      trackId,
-      // Race 3's ending is the director's, not the results screen's.
-      showResults: trackId !== 'track3',
+      levelId: level.id,
+      // The ending of the level that breaks is the director's, not the results
+      // screen's — there is no result, because there is no finish.
+      showResults: !level.story?.breaks,
       nextLabel,
       // Hold on the grid: the fade-in below has to finish before the lights go
       // out, or the countdown plays behind the curtain. See RaceMode#startCountdown.
@@ -208,17 +241,30 @@ export class IntroDirector {
 
     // Name the parkour while the player is still sitting on the grid looking
     // at it, then let it sit for a beat before the countdown takes over.
-    this._play(preBeat);
+    this._play(this._beat(level, 'pre'));
     await this._wait(T.gridHold);
     await g.modes.current?.startCountdown?.();
 
     // Resolves when the player has seen the result and pressed on — NOT when
-    // the line is crossed. For track 3 it never resolves; the breakout does.
+    // the line is crossed. On the level that breaks it never resolves; the
+    // breakout does.
     await new Promise((resolve) => {
       this._raceResolved = resolve;
     });
-    if (postBeat) this._play(postBeat);
+    this._play(this._beat(level, 'post'));
     await this._wait(T.betweenRaces);
+  }
+
+  /**
+   * A level's beat id for a moment in its race.
+   *
+   * By convention — `level3.blackout` is the blackout line for `level3` — so a
+   * new level's writing is entries in `beats.js` and nothing else, and a level
+   * with no writing yet plays nothing rather than throwing. A level may name
+   * its beats explicitly in `story.beats` if it wants to share another's.
+   */
+  _beat(level, moment) {
+    return level?.story?.beats?.[moment] ?? `${level?.id}.${moment}`;
   }
 
   _onRaceDismissed(p) {
@@ -232,15 +278,21 @@ export class IntroDirector {
   // -- THE BREAK ------------------------------------------------------------
 
   /**
-   * Watch the player round parkur 3 and cut the lights at the scripted point.
-   * Called from `update()`; `race:offCourse` handles what happens after.
+   * Watch the player round the parkour that breaks and cut the lights at the
+   * scripted point. Called from `update()`; `race:offCourse` handles what
+   * happens after. On any level that does not break, `track.data.breakout` is
+   * absent and this is a couple of property reads per frame.
    */
   _watchForBlackout(dt) {
-    if (this.phase !== 'race3' || this._blackoutDone) return;
+    if (this.phase !== 'race' || this._blackoutDone || !this.level?.story?.breaks) return;
     const g = this.game;
-    const track = g.world.getTrack('track3');
+    // `world` is genuinely null while a level's map is being built — the old
+    // one is disposed before the new one exists (see `src/game/levels.js`), and
+    // the loop keeps running behind the loading screen. Everything the director
+    // reads per frame has to survive that gap.
+    const track = g.world?.mainTrack;
     const player = g.player;
-    if (!track || !player) return;
+    if (!track?.data?.breakout || !player) return;
 
     const q = track.query(player.position.x, player.position.z, this._q || (this._q = {}));
     if (!q) return;
@@ -256,14 +308,14 @@ export class IntroDirector {
 
   async _cutTheLights(track, cfg) {
     const g = this.game;
-    const rig = g.world.lighting.get('track3');
+    const rig = g.world.lighting.get(track.id);
 
     events.emit('intro:blackout', {});
     // The rig stutters and dies. It does not come back before the corner.
     rig?.blackout(cfg.blackoutSeconds ?? 9);
     g.audio.playGlitchStinger?.();
     g.setGlitch(0.28);
-    this._play('race3.blackout');
+    this._play(this._beat(this.level, 'blackout'));
 
     // Headlights. The reason they were off is that they were never needed:
     // the route was lit for you, right up until it wasn't.
@@ -276,7 +328,8 @@ export class IntroDirector {
   }
 
   _onOffCourse(p) {
-    if (this.phase !== 'race3' || !p.isPlayer) return;
+    // Only on the level that breaks. Running wide on bölüm 1 is running wide.
+    if (this.phase !== 'race' || !this.level?.story?.breaks || !p.isPlayer) return;
 
     // Time it against `outOfBoundsTime`, never `duration`. `duration` counts
     // from the first centimetre past the ribbon edge, which on a dirt parkur is
@@ -320,11 +373,15 @@ export class IntroDirector {
     await this._wait(T.glitchSustain);
 
     // 4. Hand over. The *same car*, still moving, now in a mode with no rules.
-    //    No fade, no load, no reset — this is the whole trick.
+    //    No fade, no load, no reset — this is the whole trick, and it is why
+    //    no `levelId` is passed: the open world the player breaks into is the
+    //    map they were already racing on. Loading anything here would stop the
+    //    car, and stopping the car is the one thing this moment cannot do.
     await g.modes.switchTo('openWorld', { keepPlayer: true, keepRacers: true, rig: 'chaseWide' });
-    g.world.setBarriersEnabled('track3', false);
+    const track = g.world.mainTrack;
+    g.world.setBarriersEnabled(track?.id, false);
     // The rig never comes back on. Drive past the stage later and it is dark.
-    const rig = g.world.lighting.get('track3');
+    const rig = g.world.lighting.get(track?.id);
     rig?.hold();
     rig?.setPower(0);
     // Headlights stay on from here — it is the only light the player owns.
@@ -379,10 +436,18 @@ export class IntroDirector {
       }
     }
 
-    // Driving back to a parkour you raced is the payoff for the whole premise.
-    if (g.player && this._time - this._trackFoundAt > T.trackFoundCooldown) {
-      const t = g.world.onAnyTrack(g.player.position.x, g.player.position.z);
-      if (t && t.id !== 'track3') {
+    // Driving back onto the ribbon you escaped from is the payoff for the whole
+    // premise: the rivals are still going round it, still racing a race that
+    // ended for you. `T.trackFoundReturn` keeps it off the first minute — the
+    // player has only just slid off the thing, and being told about it while
+    // the tyre marks are still behind them says nothing.
+    if (
+      g.player &&
+      this._freeTime > T.trackFoundReturn &&
+      this._time - this._trackFoundAt > T.trackFoundCooldown
+    ) {
+      const t = g.world?.onAnyTrack(g.player.position.x, g.player.position.z);
+      if (t) {
         this._trackFoundAt = this._time;
         this._play('wander.trackFound');
       }
@@ -547,7 +612,12 @@ export class IntroDirector {
       g.setGlitch(0);
       g.setTheme('outside', 0);
       g.audio.setAmbience('outside');
-      await g.modes.switchTo('openWorld', { keepPlayer: false, rig: 'chaseWide' });
+      // The map the story would have left them on. See `FREE_ROAM_LEVEL`.
+      await g.modes.switchTo('openWorld', {
+        levelId: g.boot.level || FREE_ROAM_LEVEL,
+        keepPlayer: false,
+        rig: 'chaseWide',
+      });
       g.flags.escaped = true;
       // Nobody is going to narrate the glass on a boot that skipped the story,
       // so it is simply already there. `?skip=intro` does the same in main.js.

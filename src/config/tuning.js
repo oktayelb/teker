@@ -215,7 +215,7 @@ export const ACTIVE_PROFILE = 'hatchback';
 //
 // `ICE` and `MUD` are what betray the player on the third parkour: the outer
 // sweeper is coated in them so the car understeers off the ribbon. See
-// `src/world/tracks/track3.js`.
+// `src/levels/level3.js`.
 
 export const SURFACES = {
   TARMAC: { id: 'TARMAC', grip: 1.0, drag: 1.0, power: 1.0, rumble: 0.0, dustColor: null },

@@ -76,10 +76,10 @@ try {
   // =========================================================================
   console.log('\n— parkur 3: the sky, and the grid —');
   const p3 = await open('?start=race3');
-  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "track3"', { timeout: 40000 });
+  await p3.waitForFunction('TEKER.game.modes.current?.track?.id === "level3"', { timeout: 40000 });
 
   let s = await snapshot(p3);
-  check('parkur 3 runs at night', s.theme === 'Night', `theme=${s.theme}`);
+  check('bölüm 3 runs at night', s.theme === 'Night', `theme=${s.theme}`);
   check('cars are held on the grid', s.cars.every((c) => c.disabled), JSON.stringify(s.cars.map((c) => c.disabled)));
 
   // Sit through the grid hold and the countdown, sampling for creep.

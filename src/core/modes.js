@@ -61,6 +61,21 @@ export class ModeManager {
     this._queued = null;
     /** Optional async hook: `(phase, name) => Promise` for fades. */
     this.transition = null;
+    /**
+     * Optional async hook: `(name, params) => Promise`, run after the old mode
+     * is gone and before the new one is built.
+     *
+     * It exists for exactly one thing, and that thing is worth a hook rather
+     * than a line in every mode: `params.levelId` names a level, and a level is
+     * a whole map that has to be *built* before anything can be spawned onto
+     * it. `Game` installs the loader here (see `src/game/levels.js`), so a mode
+     * written next year gets level loading by existing, and a mode that never
+     * names a level never pays for it.
+     *
+     * Between exit and enter is the only correct moment: the previous mode has
+     * released its cars, and the new one has not asked for the world yet.
+     */
+    this.prepare = null;
   }
 
   /** register('race', RaceMode) — lets the intro ask for modes by name. */
@@ -96,6 +111,8 @@ export class ModeManager {
         this.current.active = false;
         await this.current.exit();
       }
+
+      if (this.prepare) await this.prepare(name, params);
 
       const next = new ModeClass(this.ctx);
       next.name = name;

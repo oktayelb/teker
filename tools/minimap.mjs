@@ -62,7 +62,9 @@ try {
   check('the map exists and is mounted', built.exists && built.mounted);
   check('the forest was indexed', built.trees > 3000, `${built.trees} trees`);
   check('so were the rocks', built.rocks > 500, `${built.rocks} rocks and logs`);
-  check('all three parkours are on it', built.tracks === 3, `${built.tracks} ribbons`);
+  // One map, one parkour: every level owns its own world now, so the ribbon on
+  // the minimap is this level's ribbon and there is nothing else out there.
+  check('this level\'s parkour is on it', built.tracks === 1, `${built.tracks} ribbons`);
   check('and the landmarks', built.landmarks === 6, `${built.landmarks} places`);
   check('it starts closed', built.visible === false);
 
@@ -143,7 +145,7 @@ try {
 
   // -- 6. it is there in a race too -----------------------------------------
 
-  await page.evaluate(() => TEKER.game.modes.switchTo('race', { trackId: 'track1' }));
+  await page.evaluate(() => TEKER.game.modes.switchTo('race', { levelId: 'level1' }));
   await sleep(2500);
   await page.keyboard.press('KeyH');
   await sleep(500);
@@ -152,7 +154,7 @@ try {
     return { visible: m.visible, open: m.el.classList.contains('is-open'), active: m._activeTrackId, next: m._nextCheckpoint };
   });
   check('the map opens in a race', race.visible && race.open);
-  check('…and knows which ribbon is live', race.active === 'track1', String(race.active));
+  check('…and knows which ribbon is live', race.active === 'level1', String(race.active));
   check('…and which checkpoint is next', typeof race.next === 'number', String(race.next));
 
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/minimap-race.png` });

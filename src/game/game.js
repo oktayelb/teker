@@ -1,8 +1,14 @@
 /**
  * GAME — the context object every mode is handed.
  *
- * It owns the long-lived things: the renderer, the world, the camera, input,
- * audio, UI, and the vehicle registry. It owns no rules. Modes own rules.
+ * It owns the long-lived things: the renderer, the camera, input, audio, UI,
+ * the vehicle registry, and — through `levels` — whichever level's map is
+ * currently standing. It owns no rules. Modes own rules.
+ *
+ * `world` is the one thing here that is NOT long-lived: every level has a map
+ * of its own, so entering a level builds one and disposes the last
+ * (`src/game/levels.js`). It is null while that is happening. Anything that
+ * reads it every frame has to say so.
  *
  * NOTE ON THE INTRO
  * -----------------
@@ -15,7 +21,6 @@
 import * as THREE from 'three';
 import { RetroRenderer } from '../render/renderer.js';
 import { CameraRig } from '../render/cameraRig.js';
-import { World } from '../world/world.js';
 import { Vehicle } from '../vehicle/vehicle.js';
 import { createChassis } from '../vehicle/chassis.js';
 import { resolveVehicleContacts } from '../vehicle/contacts.js';
@@ -25,9 +30,10 @@ import { input, BINDINGS } from '../core/input.js';
 import { events } from '../core/events.js';
 import { audio } from '../audio/audio.js';
 import { ui } from '../ui/index.js';
-import { ALL_TRACKS } from '../world/tracks/index.js';
+import { LevelHost } from './levels.js';
+import { FIRST_LEVEL } from '../levels/index.js';
 import { MODE_RIGS } from '../config/camera.js';
-import { OPEN_WORLD, PLAYER } from '../config/gameplay.js';
+import { PLAYER } from '../config/gameplay.js';
 import { ACTIVE_PROFILE } from '../config/tuning.js';
 import { MINIMAP } from '../config/minimap.js';
 import { settings } from '../config/settings.js';
@@ -54,8 +60,16 @@ export class Game {
     this.ui = ui;
     this.loop = new Loop({ hz: 120, maxSubSteps: 6 });
     this.modes = new ModeManager(this);
+    /**
+     * Which level is loaded, and the machinery for changing that.
+     *
+     * A level owns its map, so this is also what owns `this.world`: the host
+     * builds a world when a level is entered and points the game at it. See
+     * `src/game/levels.js`.
+     */
+    this.levels = new LevelHost(this);
 
-    /** @type {World|null} */
+    /** @type {import('../world/world.js').World|null} the loaded level's map */
     this.world = null;
     /** @type {Vehicle|null} the car the human is driving */
     this.player = null;
@@ -81,6 +95,10 @@ export class Game {
   }
   get scene() {
     return this.renderer.scene;
+  }
+  /** The level whose map is loaded, or null before the first one is. */
+  get level() {
+    return this.levels.current;
   }
 
   // -- lifecycle ------------------------------------------------------------
@@ -124,19 +142,20 @@ export class Game {
     globalThis.addEventListener('keydown', unlock, true);
     if (this.boot.muted) this.audio.setMuted(true);
 
-    this.world = new World({
-      materials: this.materials,
-      theme: this.renderer.theme,
-      seed: this.boot.seed ?? OPEN_WORLD.seed,
-      lightPool: this.renderer.lights,
-    });
-    this.camera.world = this.world;
+    // The first level's map. Everything a world used to be handed at
+    // construction — its seed, its size, its forest — now comes from the level
+    // that owns it, and `LevelHost` is the only thing that builds one.
+    //
+    // `?level=` picks which one you boot into; the loading screen here belongs
+    // to `main.js`, so the host is told not to raise its own.
+    await this.levels.load(this.boot.level || FIRST_LEVEL, { onProgress, screen: false });
 
-    await this.world.build({ trackData: ALL_TRACKS, onProgress });
-    this.renderer.addRoot(this.world.root);
-    // The map indexes the forest and the ribbons once, here, rather than
-    // rediscovering them every frame. See `Minimap#setWorld`.
-    this.ui.minimap.setWorld(this.world);
+    // Any later mode switch that names a level loads it the same way. This hook
+    // is the reason a mode does not have to know levels exist — see
+    // `ModeManager#prepare`.
+    this.modes.prepare = async (_name, params) => {
+      if (params?.levelId) await this.levels.load(params.levelId);
+    };
 
     globalThis.addEventListener('resize', this._boundResize);
     this._onResize();
@@ -171,7 +190,7 @@ export class Game {
     this.loop.stop();
     globalThis.removeEventListener('resize', this._boundResize);
     this.input.detach();
-    this.world?.dispose();
+    this.levels.dispose();
     this.renderer.dispose();
     this.ui.unmount();
     this.audio.dispose();

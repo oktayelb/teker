@@ -53,7 +53,7 @@ console.log('car-on-car:', JSON.stringify(out));
 // Barrier clearance while actually driving: hug the right-hand barrier.
 const hug = await page.evaluate(async () => {
   const g = TEKER.game;
-  const t = g.world.getTrack('track1');
+  const t = g.world.mainTrack;
   const THREE = await import('three');
   const i = t.sampleIndexAt(0.3);
   let touches = 0;

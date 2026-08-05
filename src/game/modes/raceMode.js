@@ -5,6 +5,13 @@
  * laps and checkpoints, sorts the standings, and shows a results screen. That
  * is all it will ever do.
  *
+ * IT DOES NOT LOAD ANYTHING. `enter({ levelId })` names a level, and by the
+ * time this runs that level's map is already standing: `ModeManager#prepare`
+ * built it (see `src/game/levels.js`). So the race can spawn cars in its first
+ * few lines, and adding a level never means touching this file — the ribbon it
+ * races is whichever one the loaded map has on it, and the rules come off the
+ * level's own `race` block.
+ *
  * It does, however, *report* honestly: when a car is a long way off course it
  * emits `race:offCourse` every step with how far and for how long. Race mode
  * treats that as a statistic. The intro director treats it as the end of the
@@ -118,6 +125,8 @@ export class RaceMode extends Mode {
   constructor(ctx) {
     super(ctx);
     this.track = null;
+    /** @type {object|null} the level being raced; set in `enter`. */
+    this.level = null;
     /** @type {Progress[]} */
     this.progress = [];
     this.rivals = [];
@@ -136,7 +145,10 @@ export class RaceMode extends Mode {
 
   /**
    * @param {object} params
-   * @param {string} params.trackId
+   * @param {string} params.levelId which level to race — its map is already
+   *   loaded by the time this runs (see the header)
+   * @param {string} [params.trackId] a specific ribbon, for a map with more
+   *   than one. Defaults to the parkour the map was built around.
    * @param {number} [params.laps]
    * @param {number} [params.rivals]
    * @param {boolean} [params.showResults]
@@ -147,30 +159,37 @@ export class RaceMode extends Mode {
    */
   async enter(params = {}) {
     const g = this.ctx;
-    this.track = g.world.setActiveTrack(params.trackId);
-    if (!this.track) throw new Error(`RaceMode: unknown track "${params.trackId}"`);
-    this.laps = params.laps ?? this.track.laps ?? RACE.laps;
+    /** @type {object|null} the level definition, for its name and its rules */
+    this.level = g.levels.current;
+    const trackId = params.trackId ?? g.world.mainTrack?.id;
+    this.track = g.world.setActiveTrack(trackId);
+    if (!this.track) {
+      throw new Error(`RaceMode: level "${params.levelId ?? g.levels.currentId}" has no track "${trackId}"`);
+    }
+    this.laps = params.laps ?? this.level?.race?.laps ?? this.track.laps ?? RACE.laps;
     this.showResults = params.showResults !== false;
     this.autoAdvance = params.autoAdvance ?? null;
     // Race mode has no idea whether anything comes next — whoever sequenced it
     // does, so they get to name the button.
     this.nextLabel = params.nextLabel ?? (this.autoAdvance ? 'SONRAKİ YARIŞ' : 'DEVAM');
 
-    // A track knows what time of day it is. Parkur 3 is lit by a rig, not by
-    // the sun, so it carries `theme: 'night'` — see its header.
-    if (this.track.data?.theme) g.setTheme(this.track.data.theme, params.themeFade ?? 0);
+    // A level knows what time of day it is. Bölüm 3 is lit by a rig, not by
+    // the sun, so it carries `theme: 'night'` — see its header. (A track may
+    // still override its level, for a map with a stage on it that runs late.)
+    const theme = this.track.data?.theme || this.level?.theme;
+    if (theme) g.setTheme(theme, params.themeFade ?? 0);
 
     g.clearVehicles();
     g.useModeRig('race', true);
     g.ui.hud.setMode('race');
     g.ui.hud.setLap({ lap: 1, total: this.laps });
 
-    const rivalCount = params.rivals ?? RACE.rivals;
-    const theme = g.theme;
+    const rivalCount = params.rivals ?? this.level?.race?.rivals ?? RACE.rivals;
+    const palette = g.theme;
 
     // Player takes pole's inside line; the AI fills the grid behind.
     const playerSlot = this.track.gridSlot(0, RACE.gridRowGap, RACE.gridColumnGap, RACE.poleGap);
-    const player = g.spawnVehicle({ kind: 'player', color: theme.vehicles.player, id: 'player', isPlayer: true });
+    const player = g.spawnVehicle({ kind: 'player', color: palette.vehicles.player, id: 'player', isPlayer: true });
     player.reset(playerSlot.position, playerSlot.heading);
     g.setDriver(player, (v) => (this.state === 'racing' ? g.input.state : ZERO_COMMAND));
 
@@ -179,7 +198,7 @@ export class RaceMode extends Mode {
       const rival = g.spawnVehicle({
         profile: 'rival',
         kind: 'rival',
-        color: theme.vehicles.rivals[i % theme.vehicles.rivals.length],
+        color: palette.vehicles.rivals[i % palette.vehicles.rivals.length],
         id: `rival${i}`,
       });
       rival.reset(slot.position, slot.heading);
@@ -209,11 +228,18 @@ export class RaceMode extends Mode {
     // simply "stay where you were put".
     this._setGridHold(true);
 
-    g.audio.setAmbience('forest');
-    g.audio.setMusic('race');
+    // The level says what its map sounds like. A night stage is not a forest
+    // at noon, and neither is whatever the eighth one turns out to be.
+    g.audio.setAmbience(this.level?.ambience || 'forest');
+    g.audio.setMusic(this.level?.music ?? 'race');
     g.audio.startEngine();
 
-    events.emit('race:ready', { trackId: this.track.id, name: this.track.name, laps: this.laps });
+    events.emit('race:ready', {
+      levelId: this.level?.id ?? null,
+      trackId: this.track.id,
+      name: this.level?.name || this.track.name,
+      laps: this.laps,
+    });
 
     // 'deferred' leaves the cars parked on the grid. `enter()` resolves as soon
     // as the scene is built, and the caller decides when the lights go out.
@@ -257,7 +283,7 @@ export class RaceMode extends Mode {
     this.state = 'racing';
     this.time = 0;
     for (const p of this.progress) p.lapStart = 0;
-    events.emit('race:started', { trackId: this.track.id, laps: this.laps });
+    events.emit('race:started', { levelId: this.level?.id ?? null, trackId: this.track.id, laps: this.laps });
   }
 
   async exit() {
@@ -313,6 +339,7 @@ export class RaceMode extends Mode {
           /** How long genuinely out of bounds — see RACE.outOfBoundsDistance. */
           outOfBoundsTime: p.outOfBoundsTime,
           lap: p.lap,
+          levelId: this.level?.id ?? null,
           trackId: this.track.id,
         });
       }
@@ -338,8 +365,9 @@ export class RaceMode extends Mode {
     g.audio.setMusic('none');
 
     this._results = {
+      levelId: this.level?.id ?? null,
       trackId: this.track.id,
-      trackName: this.track.name,
+      trackName: this.level?.name || this.track.name,
       position: playerProgress.place,
       total: this.progress.length,
       laps: this.laps,

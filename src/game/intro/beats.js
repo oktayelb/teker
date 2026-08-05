@@ -27,34 +27,39 @@ export const BEATS = {
     subtitle: { text: 'Three parkours. Forest circuit. Standard rules.', duration: 3.2, tone: 'system' },
   },
 
-  // -- race one -------------------------------------------------------------
-  'race1.pre': [
-    { subtitle: { text: 'ÇAM HALKASI · Parkur 1', duration: 2.6, tone: 'system' } },
+  // -- bölüm one ------------------------------------------------------------
+  //
+  // Beat ids are LEVEL ids: the director looks up `<levelId>.pre` and
+  // `<levelId>.post` for whichever level it is staging (see `_beat`). A level
+  // with nothing written for it plays nothing, so adding one is adding lines
+  // here when you have them — not before.
+  'level1.pre': [
+    { subtitle: { text: 'ÇAM HALKASI · Bölüm 1', duration: 2.6, tone: 'system' } },
     { subtitle: { text: 'Two laps. Stay on the road.', duration: 2.8 } },
   ],
-  'race1.post': [
+  'level1.post': [
     { subtitle: { text: 'Clean run. Nothing unusual.', duration: 2.6, tone: 'system' } },
   ],
 
-  // -- race two -------------------------------------------------------------
-  'race2.pre': [
-    { subtitle: { text: 'DERE GEÇİDİ · Parkur 2', duration: 2.6, tone: 'system' } },
+  // -- bölüm two ------------------------------------------------------------
+  'level2.pre': [
+    { subtitle: { text: 'DERE GEÇİDİ · Bölüm 2', duration: 2.6, tone: 'system' } },
     { subtitle: { text: 'The surface changes on the descent.', duration: 2.8 } },
   ],
-  'race2.post': [{ subtitle: { text: 'Two of three complete.', duration: 2.4, tone: 'system' } }],
+  'level2.post': [{ subtitle: { text: 'Two of three complete.', duration: 2.4, tone: 'system' } }],
 
-  // -- race three -----------------------------------------------------------
-  'race3.pre': [
-    { subtitle: { text: 'SIRT YOLU · Parkur 3', duration: 2.6, tone: 'system' } },
+  // -- bölüm three ----------------------------------------------------------
+  'level3.pre': [
+    { subtitle: { text: 'SIRT YOLU · Bölüm 3', duration: 2.6, tone: 'system' } },
     { subtitle: { text: 'Not a road. Dirt, posts, and the lights they hung for you.', duration: 3.4 } },
   ],
   /** The rig fails. Played the instant the lights go. */
-  'race3.blackout': [
+  'level3.blackout': [
     { subtitle: { text: 'The lights go out.', duration: 2.0, tone: 'system' } },
     { subtitle: { text: 'All of them, at once, for a long way ahead.', duration: 3.0 } },
   ],
   /** Played once, as the player first reaches the wet stretch. */
-  'race3.ice': {
+  'level3.ice': {
     subtitle: { text: 'The road has stopped telling you where it goes.', duration: 2.6 },
   },
 
@@ -202,6 +207,15 @@ export const INTRO_TIMING = {
   domeZoom: -17,
   /** Ambient wander lines fire on this cadence, if the player is still moving. */
   wanderInterval: 11,
+  /**
+   * Seconds of freedom before "they are still racing" can fire at all.
+   *
+   * The player leaves the ribbon by sliding off it, and for the first minute
+   * the thing they escaped is directly behind them. Being told that the race
+   * is still going round is only worth saying once it has become something
+   * they came back to.
+   */
+  trackFoundReturn: 60,
   /** After the chase ends, how long before the closing lines. */
   aloneDelay: 6.0,
   /** How long the "they are still racing" observation waits before rearming. */

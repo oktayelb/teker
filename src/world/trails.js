@@ -51,9 +51,12 @@ export class Trails {
    * @param {{px:Float32Array|number[], pz:Float32Array|number[], count:number}[]} [opts.tracks]
    *   parkour centrelines; each landmark gets a route to the nearest point on one
    * @param {number} [opts.seed]
+   * @param {object} [opts.cfg] the level's own trail settings, merged over
+   *   `OPEN_WORLD.trails` by `World#_resolveSpec`. A map with wider or fainter
+   *   routes than the default is a level file field, not a fork of this class.
    */
-  constructor({ halfSpan, landmarks, tracks = [], seed = 1 }) {
-    this.cfg = OPEN_WORLD.trails;
+  constructor({ halfSpan, landmarks, tracks = [], seed = 1, cfg = OPEN_WORLD.trails }) {
+    this.cfg = cfg;
     this.halfSpan = halfSpan;
     this.seed = seed;
     /** @type {{x0:number,z0:number,x1:number,z1:number}[]} */
@@ -121,13 +124,34 @@ export class Trails {
     const a2 = rng.range(-0.6, 0.6);
     const amp = C.wander * Math.min(1, len / 400);
 
-    const pts = [];
+    const offsets = [];
+    let strayed = 0;
     for (let i = 0; i <= C.segments; i++) {
       const t = i / C.segments;
       // sin(pi t) pins both ends: the trail arrives exactly at the landmark
       // and exactly at the road, however far it strayed in between.
       const hold = Math.sin(Math.PI * t);
       const off = (Math.sin(t * 3.1 + p1) * a1 + Math.sin(t * 6.7 + p2) * a2) * amp * hold;
+      offsets.push(off);
+      strayed = Math.max(strayed, Math.abs(off));
+    }
+
+    // NO ROUTE MAY COME OUT STRAIGHT.
+    //
+    // The two waves above are randomly phased, so now and then they cancel and
+    // the "path" is a ruler line between two points — which is the one thing a
+    // worn route must never look like. It used to be rare enough to ignore
+    // because routes were short; on a map with a single parkour in the middle
+    // of it a landmark route crosses most of the world, and a straight line
+    // that long is a survey marking. So the wander is rescaled to a floor
+    // proportional to the route's own length, rather than left to the dice.
+    const floor = Math.min(amp, len * C.minWander);
+    const scale = strayed > 1e-3 && strayed < floor ? floor / strayed : 1;
+
+    const pts = [];
+    for (let i = 0; i <= C.segments; i++) {
+      const t = i / C.segments;
+      const off = offsets[i] * scale;
       const x = a.x + dx * t + nx * off;
       const z = a.z + dz * t + nz * off;
       pts.push({ x, z });

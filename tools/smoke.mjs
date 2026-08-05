@@ -111,20 +111,118 @@ section('4. the world builds');
 
 const { MaterialLibrary } = await import('../src/render/materials.js');
 const { World } = await import('../src/world/world.js');
-const { ALL_TRACKS } = await import('../src/world/tracks/index.js');
+const { LEVELS, levelById } = await import('../src/levels/index.js');
 const { ROAD } = await import('../src/world/track.js');
 
 const theme = resolveTheme('forest');
 const preset = resolveRenderPreset('psx');
 const materials = new MaterialLibrary(theme, preset);
 
-const t0 = Date.now();
-const world = new World({ materials, theme, seed: 0x7e4e17 });
-await world.build({ trackData: ALL_TRACKS, scatter: true });
-const buildMs = Date.now() - t0;
+/**
+ * Build a level's own map, exactly the way `LevelHost` does it in the game.
+ *
+ * Every level has a world to itself, so a test that wants two levels builds
+ * two worlds — there is no longer a single terrain with every parkour on it,
+ * and asserting against one would be asserting against something the game
+ * never constructs.
+ */
+async function buildLevel(id, { scatter = true } = {}) {
+  const level = levelById(id);
+  if (!level) throw new Error(`no such level "${id}"`);
+  const th = resolveTheme(level.theme);
+  const w = new World({ materials: new MaterialLibrary(th, preset), theme: th, spec: level.map });
+  await w.build({ trackData: level.tracks, scatter });
+  return w;
+}
 
-ok('three tracks exist', world.tracks.size === 3, [...world.tracks.keys()].join(', '));
+const t0 = Date.now();
+/** Bölüm 1's map: the barriered oval in daylight. Most checks below use it. */
+const world = await buildLevel('level1');
+const buildMs = Date.now() - t0;
+/** Bölüm 3's map: the stage that breaks, and the only place the escape exists. */
+const world3 = await buildLevel('level3');
+const t1 = world.mainTrack;
+const t3 = world3.mainTrack;
+
 ok('build time is sane', buildMs < 30000, `${buildMs}ms`);
+
+// -- ONE LEVEL, ONE MAP ------------------------------------------------------
+// The premise of `src/levels/`: no two levels stand on the same ground. Every
+// one of them is built here, cheaply (no forest), and asked three things —
+// does it have a map of its own, is its parkour on it, and is that map
+// genuinely different land from every other level's.
+{
+  const seeds = new Map();
+  const heights = [];
+  for (const level of LEVELS) {
+    const w = await buildLevel(level.id, { scatter: false });
+    const track = w.mainTrack;
+    ok(`${level.id} "${level.name}" has a map of its own`, !!track && !!w.terrain,
+      `seed 0x${level.map.seed.toString(16)}, ${Math.round(w.halfSpan)}m half-span`);
+
+    // A parkour authored off the middle of its map spends its lap climbing the
+    // rim (see `TERRAIN_SHAPE.rimStart`). Every track has room around it.
+    let furthest = 0;
+    for (let i = 0; i < track.count; i++) furthest = Math.max(furthest, Math.hypot(track.px[i], track.pz[i]));
+    ok(`…with its parkour inside it`, furthest < w.halfSpan * 0.6,
+      `furthest point ${Math.round(furthest)}m of ${Math.round(w.halfSpan)}m`);
+
+    ok(`…and exactly its own tracks on it`, w.tracks.size === level.tracks.length,
+      [...w.tracks.keys()].join(', '));
+
+    if (seeds.has(level.map.seed)) {
+      ok(`…on land nobody else is standing on`, false, `shares a seed with ${seeds.get(level.map.seed)}`);
+    } else {
+      seeds.set(level.map.seed, level.id);
+      ok(`…on land nobody else is standing on`, true);
+    }
+    // THE GLASS, ON EVERY MAP. A dome is derived from the ribbon under it and
+    // sampled off the ground around it, so it is only as good as the land the
+    // level was seeded onto — and a bad draw is a roof the player cannot drive
+    // up or one the forest grows through. Checked here, per level, so the
+    // answer arrives when the level is added rather than when somebody
+    // eventually drives out there. If it fails: pick another `map.seed`.
+    const dome = w.domes?.domes[0];
+    if (dome) {
+      let headroom = Infinity;
+      for (let i = 0; i < track.count; i++) {
+        headroom = Math.min(headroom, dome.heightAt(track.px[i], track.pz[i]) - track.py[i]);
+      }
+      ok(`…with a roof over the racing line`, headroom > 15,
+        `${headroom.toFixed(1)}m at the tightest point, ${Math.round(dome.height)}m at the apex`);
+
+      const nrm = new THREE.Vector3();
+      const slopes = [];
+      for (let ri = 1; ri < 40; ri++) {
+        for (let ai = 0; ai < 60; ai++) {
+          const r = (ri / 40) * dome.radius * 0.999;
+          const a = (ai / 60) * Math.PI * 2;
+          const x = dome.centerX + Math.cos(a) * r;
+          const z = dome.centerZ + Math.sin(a) * r;
+          if (dome.heightAt(x, z) - w.terrain.heightAt(x, z) < 12) continue;
+          dome.normalAt(x, z, nrm);
+          slopes.push((Math.acos(Math.min(1, nrm.y)) * 180) / Math.PI);
+        }
+      }
+      slopes.sort((a, b) => a - b);
+      ok(`…and glass a car can climb`, slopes[Math.floor(slopes.length * 0.99)] < 33,
+        `p99 ${slopes[Math.floor(slopes.length * 0.99)].toFixed(1)}°, worst ${slopes.at(-1).toFixed(1)}°`);
+    }
+
+    heights.push({ id: level.id, h: [0, 300, -700].map((x) => w.terrain.heightAt(x, x * 0.4)) });
+    w.dispose();
+  }
+  // Different seeds could still produce the same hills if the seed stopped
+  // reaching the noise. Prove the ground actually differs.
+  let identical = 0;
+  for (let i = 0; i < heights.length; i++) {
+    for (let j = i + 1; j < heights.length; j++) {
+      if (heights[i].h.every((v, k) => Math.abs(v - heights[j].h[k]) < 0.01)) identical++;
+    }
+  }
+  ok('and the ground under each level really is different ground', identical === 0,
+    `${LEVELS.length} maps compared`);
+}
 
 let triangles = 0;
 world.root.traverse((o) => {
@@ -134,17 +232,18 @@ world.root.traverse((o) => {
 ok('world has geometry', triangles > 50000, `${Math.round(triangles / 1000)}k triangles`);
 ok('collision grid populated', world.collision.count > 1000, `${world.collision.count} colliders`);
 
-for (const t of world.tracks.values()) {
-  ok(`${t.id} "${t.name}"`, t.count > 100 && t.length > 500, `${Math.round(t.length)}m, ${t.count} samples`);
+for (const w of [world, world3]) {
+  for (const t of w.tracks.values()) {
+    ok(`${t.id} "${t.name}"`, t.count > 100 && t.length > 500, `${Math.round(t.length)}m, ${t.count} samples`);
+  }
 }
 
 // The road must be flat under the car, not stepped by the coarse heightfield.
-const t3 = world.getTrack('track3');
 let maxStep = 0;
 for (let i = 0; i < t3.count; i += 3) {
-  const a = world.sampleGround(t3.px[i], t3.pz[i]).height;
+  const a = world3.sampleGround(t3.px[i], t3.pz[i]).height;
   const j = (i + 3) % t3.count;
-  const b = world.sampleGround(t3.px[j], t3.pz[j]).height;
+  const b = world3.sampleGround(t3.px[j], t3.pz[j]).height;
   maxStep = Math.max(maxStep, Math.abs(b - a));
 }
 ok('road surface is smooth', maxStep < 2.2, `max step ${maxStep.toFixed(2)}m over 9m`);
@@ -200,7 +299,7 @@ ok('road surface is smooth', maxStep < 2.2, `max step ${maxStep.toFixed(2)}m ove
   for (let k = 0; k < 400; k++) {
     // Concentrated near the tracks, which is where the shaper makes the twist
     // large and where the player actually is.
-    const tr = t3;
+    const tr = t1;
     const i = Math.floor((k / 400) * tr.count);
     const off = ((k * 37) % 61) - 30;
     const x = tr.px[i] + tr.rx[i] * off;
@@ -214,7 +313,7 @@ ok('road surface is smooth', maxStep < 2.2, `max step ${maxStep.toFixed(2)}m ove
   ok(
     'sampled ground matches the triangle the GPU is drawing',
     checkedMesh > 300 && worstMesh < 0.01,
-    `${checkedMesh} points beside parkur 3, worst disagreement ${worstMesh.toFixed(5)}m`
+    `${checkedMesh} points beside the parkour, worst disagreement ${worstMesh.toFixed(5)}m`
   );
 
   // The same thing over the whole world, cheaply, against the shared helper.
@@ -289,8 +388,9 @@ ok('road surface is smooth', maxStep < 2.2, `max step ${maxStep.toFixed(2)}m ove
 // Winding. A back-facing surface does not look broken, it looks *absent* —
 // you see through it to whatever is behind. The road shipped inside-out once
 // and presented as "the tarmac renders as grass".
-for (const id of ['track1', 'track2', 'track3']) {
-  const group = world.root.getObjectByName(`track:${id}`);
+for (const w of [world, world3]) {
+  const id = w.mainTrack.id;
+  const group = w.root.getObjectByName(`track:${id}`);
   let worstUp = 1;
   let checked = 0;
   for (const meshName of ['road', 'roadDecals', 'startLine']) {
@@ -345,7 +445,7 @@ ok(
 // Nothing on this track may be solid — that is the whole design.
 const markerColliders = t3.markers.filter((m) => m.solid);
 ok('the plastic posts are not solid', markerColliders.length === 0);
-ok('parkur 1 is fully enclosed', world.getTrack('track1').colliders.length > 100);
+ok('parkur 1 is fully enclosed', t1.colliders.length > 100);
 
 // ---------------------------------------------------------------------------
 section('5. physics — and the escape actually happens');
@@ -488,7 +588,9 @@ function playerModel(track, { reaction = 0.35, lookahead = 18 } = {}) {
 
 function runCorner(driverFactory, label, profile = 'hatchback', ignoreSurfaces = false) {
   const startIndex = t3.sampleIndexAt(0.42);
-  const car = new Vehicle({ profile, world, id: label });
+  // On bölüm 3's own map: the clay, the terrain under it and the car all have
+  // to be the ones the player actually meets.
+  const car = new Vehicle({ profile, world: world3, id: label });
   car.ignoreSurfaces = ignoreSurfaces;
   car.reset(
     new THREE.Vector3(t3.px[startIndex], t3.py[startIndex] + 0.5, t3.pz[startIndex]),
@@ -540,7 +642,7 @@ ok('...far enough to trigger the breakout', wouldTrigger, `threshold ${BREAKOUT.
 // outcome: the corner is unfair to reflexes, not impossible in principle.
 const ai = runCorner(
   (v) => {
-    const d = new AiDriver(v, { track: t3, skill: 0.85, aggression: 0.7, seed: 9, world });
+    const d = new AiDriver(v, { track: t3, skill: 0.85, aggression: 0.7, seed: 9, world: world3 });
     return (_, dt) => d.update(dt);
   },
   'ai-escapee'
@@ -557,7 +659,7 @@ ok(
 // as a bug rather than as something happening to you specifically.
 const rival = runCorner(
   (v) => {
-    const d = new AiDriver(v, { track: t3, skill: 0.85, aggression: 0.6, seed: 3, world });
+    const d = new AiDriver(v, { track: t3, skill: 0.85, aggression: 0.6, seed: 3, world: world3 });
     return (_, dt) => d.update(dt);
   },
   'rival',
@@ -623,7 +725,7 @@ ok(
   );
 
   // Drive down the middle of a barriered straight and touch nothing.
-  const t1 = world.getTrack('track1');
+  const t1 = world.mainTrack;
   const q2 = {};
   let clipped = 0;
   for (let i = 0; i < t1.count; i += 4) {
@@ -1033,11 +1135,19 @@ section('6. lights');
 
 // ---------------------------------------------------------------------------
 section('7. seed determinism');
-const worldB = new World({ materials, theme, seed: 0x7e4e17 });
-await worldB.build({ trackData: ALL_TRACKS, scatter: false });
+// A level is not kept in memory while you are away from it (see
+// `src/game/levels.js`) — going back rebuilds it. So "the same level twice" and
+// "the level you left" have to be the same valley, or coming back is arriving
+// somewhere new.
+const worldB = await buildLevel('level1', { scatter: false });
 const sampleA = world.terrain.heightAt(123, -456);
 const sampleB = worldB.terrain.heightAt(123, -456);
-ok('same seed, same terrain', Math.abs(sampleA - sampleB) < 1e-6, `${sampleA.toFixed(4)} vs ${sampleB.toFixed(4)}`);
+ok('same level, same terrain, every time it is rebuilt', Math.abs(sampleA - sampleB) < 1e-6,
+  `${sampleA.toFixed(4)} vs ${sampleB.toFixed(4)}`);
+ok('…and a different level is somewhere else',
+  Math.abs(world3.terrain.heightAt(123, -456) - sampleA) > 0.01,
+  `${world3.terrain.heightAt(123, -456).toFixed(4)} on bölüm 3`);
+worldB.dispose();
 
 // ---------------------------------------------------------------------------
 section('8. saved sound settings actually reach the mix');
@@ -1289,7 +1399,7 @@ section('9. ground cover — grass that is actually there');
 
   // ON THE ROAD IS THE ONE PLACE IT MUST NOT BE. Park on the start line of
   // parkur 1 — the tightest case, because the camera is then surrounded by it.
-  const t1 = world.getTrack('track1');
+  const t1 = world.mainTrack;
   const onTrack = new THREE.Vector3(t1.px[0], 0, t1.pz[0]);
   onTrack.y = terrain.heightAt(onTrack.x, onTrack.z);
   cover.update(1 / 60, onTrack);
@@ -1530,10 +1640,12 @@ section('12. somebody was here first');
 {
   const { OPEN_WORLD } = await import('../src/config/gameplay.js');
   const { Trails } = await import('../src/world/trails.js');
-  const { LANDMARK_DEFS } = await import('../src/world/world.js');
+  const { pointSegmentXZ } = await import('../src/core/mathx.js');
+  /** This map's landmarks — the defaults, turned by the level's own seed. */
   const { TERRAIN_SHAPE } = await import('../src/world/terrain.js');
   const { GROUND_PAINT: GP } = await import('../src/config/style.js');
   const T = OPEN_WORLD.trails;
+  const LM = world.spec.landmarks;
   const trails = world.trails;
   const terrain = world.terrain;
 
@@ -1541,9 +1653,9 @@ section('12. somebody was here first');
     `${trails?.routes.length} routes, ${trails?.segments.length} segments`);
   ok(
     'one route per landmark, plus the links, plus the spurs',
-    trails.routes.length <= LANDMARK_DEFS.length + T.links.length + T.spurs.count &&
-      trails.routes.length >= LANDMARK_DEFS.length + T.links.length,
-    `${trails.routes.length} of at most ${LANDMARK_DEFS.length + T.links.length + T.spurs.count}`
+    trails.routes.length <= LM.length + T.links.length + T.spurs.count &&
+      trails.routes.length >= LM.length + T.links.length,
+    `${trails.routes.length} of at most ${LM.length + T.links.length + T.spurs.count}`
   );
   ok('a trail is not geometry', !world.root.getObjectByName('trails') && typeof terrain.painter === 'function');
 
@@ -1558,20 +1670,20 @@ section('12. somebody was here first');
     return best;
   };
 
-  // The first six routes are the landmark ones, in `LANDMARK_DEFS` order.
+  // The first six routes are the landmark ones, in the level's landmark order.
   const span = terrain.halfSpan;
   let atLandmark = 0;
   let atTrack = 0;
-  for (let i = 0; i < LANDMARK_DEFS.length; i++) {
-    const d = LANDMARK_DEFS[i];
+  for (let i = 0; i < LM.length; i++) {
+    const d = LM[i];
     const route = trails.routes[i];
     const want = { x: Math.cos(d.angle) * span * d.dist, z: Math.sin(d.angle) * span * d.dist };
     if (Math.hypot(route[0].x - want.x, route[0].z - want.z) < 0.001) atLandmark++;
     if (toTrack(route.at(-1)) < 0.001) atTrack++;
   }
-  ok('every landmark route starts at its landmark', atLandmark === LANDMARK_DEFS.length,
-    `${atLandmark}/${LANDMARK_DEFS.length}`);
-  ok('…and ends on a parkour', atTrack === LANDMARK_DEFS.length, `${atTrack}/${LANDMARK_DEFS.length}`);
+  ok('every landmark route starts at its landmark', atLandmark === LM.length,
+    `${atLandmark}/${LM.length}`);
+  ok('…and ends on a parkour', atTrack === LM.length, `${atTrack}/${LM.length}`);
 
   // A route that goes from A to B in a straight line is a survey line, not a
   // path somebody wore. Every one of them has to leave the straight line.
@@ -1588,7 +1700,7 @@ section('12. somebody was here first');
 
   // The spurs. These leave a parkour and end in the trees; a spur that comes
   // back to the road is a lay-by, which is a different and much tidier story.
-  const spurs = trails.routes.slice(LANDMARK_DEFS.length + T.links.length);
+  const spurs = trails.routes.slice(LM.length + T.links.length);
   let leaveRoad = 0;
   for (const s of spurs) if (toTrack(s[0]) < 0.001 && toTrack(s.at(-1)) > 80) leaveRoad++;
   ok('the spurs leave the road and stop in the trees', spurs.length > 0 && leaveRoad === spurs.length,
@@ -1724,6 +1836,24 @@ section('12. somebody was here first');
 
     // Off the path, the forest is still the forest. Sampled 60m to the side of
     // every route centre — far outside `edgeWidth`.
+    //
+    // "Off the path" means off EVERY path. Routes cross each other, and they
+    // do it far more now that all of a map's trails converge on the one
+    // parkour standing in the middle of it — six landmark routes and eleven
+    // spurs all arriving at the same ribbon. A sample 60m to the side of one
+    // route that lands on another is two paths meeting, which is what happens
+    // where people walk; the thing this check exists to catch is a *band* that
+    // has spread wider than it should, so a sample that is near any other
+    // route's centreline is not evidence either way and is skipped.
+    const nearAnyRoute = (x, z, except) => {
+      for (const r of trails.routes) {
+        if (r === except) continue;
+        for (let k = 0; k < r.length - 1; k++) {
+          if (pointSegmentXZ(x, z, r[k].x, r[k].z, r[k + 1].x, r[k + 1].z).dist < T.edgeWidth * 1.5) return true;
+        }
+      }
+      return false;
+    };
     let beside = 0;
     let besideTrail = 0;
     for (const route of trails.routes) {
@@ -1735,6 +1865,7 @@ section('12. somebody was here first');
           const x = route[i].x + ((-(b.z - a.z) / len) * 60 * side);
           const z = route[i].z + (((b.x - a.x) / len) * 60 * side);
           if (!terrain.contains(x, z) || toTrack({ x, z }) < 60) continue;
+          if (nearAnyRoute(x, z, route)) continue;
           beside++;
           if (world.sampleGround(x, z).surface === 'TRAIL') besideTrail++;
         }
@@ -1789,7 +1920,7 @@ section('12. somebody was here first');
 
   // Deterministic from the seed, like everything else that generates the world.
   {
-    const marks = LANDMARK_DEFS.map((d) => ({
+    const marks = LM.map((d) => ({
       x: Math.cos(d.angle) * span * d.dist,
       z: Math.sin(d.angle) * span * d.dist,
     }));
@@ -2126,7 +2257,7 @@ section('15. the handbrake is a parking brake');
   // None of which may cost the handbrake turn, which is the other half of what
   // the key is for. See TUNING.handbrakeSlideSpeed.
   {
-    const t = world.getTrack('track1');
+    const t = world.mainTrack;
     const i = 40;
     const v = new Vehicle({ world, id: 'brake3' });
     v.reset(new THREE.Vector3(t.px[i], t.py[i], t.pz[i]), Math.atan2(t.tx[i], t.tz[i]));
@@ -2249,7 +2380,9 @@ section('16. the glass over the parkours');
   // which is the entire reason the player can escape from under parkur 3 and
   // still never get back in.
   {
-    const d3 = field.byId('track3');
+    // Whichever parkour this map carries — the rule is not about bölüm 3, it
+    // is about every dome the player ever comes out from under.
+    const d3 = field.byId(world.mainTrack.id);
     const player = { position: new THREE.Vector3(d3.centerX + 60, 0, d3.centerZ), isPlayer: true };
     const rival = { position: new THREE.Vector3(d3.centerX + 60, 0, d3.centerZ), isPlayer: false };
 
@@ -2267,7 +2400,7 @@ section('16. the glass over the parkours');
     player.position.set(d3.centerX + d3.radius + DOME.sealMargin + 5, 0, d3.centerZ);
     field.sync([player, rival]);
     ok('it closes behind you', field.sealedFor(player, d3));
-    ok('…and that is what reveals them', field.revealed && revealedWith === 'track3', revealedWith);
+    ok('…and that is what reveals them', field.revealed && revealedWith === world.mainTrack.id, revealedWith);
 
     // Back to where the escape happened. There is a roof there now.
     player.position.set(d3.centerX + 60, 0, d3.centerZ);
