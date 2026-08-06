@@ -18,6 +18,9 @@
  *   1. Copy the shortest existing file in this folder (`level2.js`).
  *   2. Change `id`, `name`, and the `track.points`.
  *   3. Add two lines to `index.js`: the import, and the entry in `LEVELS`.
+ *   4. Write it a song — one file in `src/audio/music/tracks/`, two lines in
+ *      `src/audio/music/index.js`, and `music:` here. A map with somebody
+ *      else's music on it is a map nobody remembers.
  *
  * That is the whole procedure. Everything below is a default you may override
  * and never have to state:
@@ -53,6 +56,13 @@ import { hashString } from '../core/rng.js';
 export const LEVEL_DEFAULTS = {
   theme: 'forest',
   ambience: 'forest',
+  /**
+   * The fallback song, not the expected one. Every shipped level names its own
+   * (`music: 'karHatti'`), composed for that map's weather and time of day —
+   * see `src/audio/music/`. A level that says nothing races to the generic
+   * loop, which is fine while you are still laying out its road and a smell
+   * you should not ship.
+   */
   music: 'race',
   race: {
     laps: RACE.laps,

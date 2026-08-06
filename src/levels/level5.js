@@ -26,6 +26,8 @@ export default defineLevel({
   subtitle: 'The Lake Shore',
   theme: 'rain',
   ambience: 'outside',
+  /** Kumoi, with a whole-tone shimmer for the rain. @see src/audio/music/tracks/golKiyisi.js */
+  music: 'golKiyisi',
   race: { laps: 2, rivals: 3 },
 
   map: {

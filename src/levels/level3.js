@@ -50,6 +50,8 @@ export default defineLevel({
    */
   theme: 'night',
   ambience: 'night',
+  /** Aeolian — the plain minor, driven fast enough not to mourn. @see src/audio/music/tracks/sirtYolu.js */
+  music: 'sirtYolu',
   race: { laps: 2, rivals: 3 },
 
   /**

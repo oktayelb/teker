@@ -35,6 +35,8 @@ export default defineLevel({
   subtitle: 'The Lid',
   theme: 'storm',
   ambience: 'night',
+  /** Octatonic — symmetrical, homeless, in the chase’s own key. @see src/audio/music/tracks/kapak.js */
+  music: 'kapak',
   race: { laps: 2, rivals: 3 },
 
   map: {

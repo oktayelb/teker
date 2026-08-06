@@ -29,6 +29,8 @@ export default defineLevel({
   subtitle: 'The Skyway',
   theme: 'outside',
   ambience: 'outside',
+  /** Phrygian — bölüm 4’s flat 2nd with the heat taken out. @see src/audio/music/tracks/havaiHat.js */
+  music: 'havaiHat',
   race: { laps: 2, rivals: 3 },
 
   map: {

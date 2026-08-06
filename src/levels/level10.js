@@ -25,6 +25,8 @@ export default defineLevel({
   subtitle: 'The Last Ring',
   theme: 'night',
   ambience: 'night',
+  /** Harmonic minor — the only track that gets to resolve. @see src/audio/music/tracks/sonHalka.js */
+  music: 'sonHalka',
   race: { laps: 2, rivals: 3 },
 
   map: {

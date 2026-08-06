@@ -2731,6 +2731,91 @@ section('18. bölümler — what the menu knows about progress');
     /game:levelSelected/.test(game) && /game:levelSelected/.test(director));
 }
 
+// ---------------------------------------------------------------------------
+section('19. every bölüm has its own song');
+
+// Music is the one thing in the game that fails *silently*: a level naming a
+// track that does not exist gets a console warning nobody reads and then the
+// previous track keeps playing, so bölüm 7 races to bölüm 6's music and nothing
+// anywhere says so. These checks are the thing that says so.
+{
+  const { MUSIC_TRACKS } = await import('../src/audio/music/index.js');
+  const { defineTrack, rest } = await import('../src/audio/music/track.js');
+  const { SCALES, degreeToSemitone, resolveScale } = await import('../src/audio/music/scales.js');
+  const { AUDIO_CONFIG } = await import('../src/audio/audio.js');
+  const { LEVEL_DEFAULTS } = await import('../src/levels/defaults.js');
+
+  ok('the engine plays what the registry holds', AUDIO_CONFIG.MUSIC.tracks === MUSIC_TRACKS);
+
+  // -- the levels ------------------------------------------------------------
+  const missing = LEVELS.filter((l) => !MUSIC_TRACKS[l.music]);
+  ok('every level names a song that exists', missing.length === 0,
+    missing.map((l) => `${l.id}→${l.music}`).join(', '));
+
+  const songs = new Set(LEVELS.map((l) => l.music));
+  ok('…and no two levels share one', songs.size === LEVELS.length,
+    `${songs.size} songs for ${LEVELS.length} levels`);
+  ok('…and none of them settled for the fallback', !songs.has(LEVEL_DEFAULTS.music),
+    LEVEL_DEFAULTS.music);
+
+  // The point of the exercise: ten stages, ten different colours. Two levels in
+  // the same mode at the same root would be one song with two names.
+  const keys = new Set(LEVELS.map((l) => `${MUSIC_TRACKS[l.music].scale}@${MUSIC_TRACKS[l.music].root}`));
+  ok('…and no two are in the same key and mode', keys.size === LEVELS.length,
+    [...keys].join(' '));
+
+  // -- what belongs to the game, not to a stage ------------------------------
+  for (const id of ['menu', 'race', 'chase', 'alone']) {
+    ok(`${id} is still there for the story to reach for`, !!MUSIC_TRACKS[id]);
+    ok(`…and no level took it`, !songs.has(id));
+  }
+
+  // -- the compiler ----------------------------------------------------------
+  // Degrees are steps *in the scale*, which is what lets one phrase read
+  // correctly in a five-note scale and a seven-note one.
+  ok('degree 7 of a seven-note mode is the octave',
+    degreeToSemitone(SCALES.dorian, 7) === 12);
+  ok('…and degree 5 of a pentatonic is', degreeToSemitone(SCALES.kumoi, 5) === 12);
+  ok('…and negative degrees walk down below the root',
+    degreeToSemitone(SCALES.aeolian, -1) === -2, `${degreeToSemitone(SCALES.aeolian, -1)}`);
+  ok('chromatic degrees are plain semitones — core.js depends on it',
+    [0, 5, 12, 19, -3].every((d) => degreeToSemitone(SCALES.chromatic, d) === d));
+  let threw = false;
+  try { resolveScale('lidyan'); } catch { threw = true; }
+  ok('a misspelled mode is refused, not quietly defaulted', threw);
+
+  // The grid has to be the common multiple of the voices or the "polymeter" is
+  // just a pattern with an unreachable tail. This is the check that keeps a new
+  // song from losing its last four steps to arithmetic.
+  const poly = defineTrack({
+    id: 'test', bpm: 120, root: 45, scale: 'aeolian',
+    voices: { bass: { pattern: [0, ...rest(15)] }, lead: { pattern: [0, ...rest(11)] } },
+  });
+  ok('a 16 and a 12 give a 48-step grid', poly.steps === 48, `${poly.steps}`);
+  for (const t of Object.values(MUSIC_TRACKS)) {
+    if (t.id === 'chase' || t.id === 'alone') continue; // hand-voiced, see core.js
+    const reach = Object.values(t.voices).every((v) => t.steps % v.pattern.length === 0);
+    ok(`${t.id}: every step of every voice is reachable`, reach,
+      `${t.steps} steps, voices ${Object.values(t.voices).map((v) => v.pattern.length).join('/')}`);
+  }
+
+  // -- and it has to be playable ---------------------------------------------
+  for (const t of Object.values(MUSIC_TRACKS)) {
+    const notes = [];
+    for (const v of Object.values(t.voices)) {
+      for (const n of v.pattern) if (n !== null) notes.push(t.root + (v.octave || 0) * 12 + n);
+    }
+    const lo = Math.min(...notes);
+    const hi = Math.max(...notes);
+    // Below MIDI 21 is under a piano's bottom note and turns to mud on a
+    // laptop; above 100 it is a whistle over an engine.
+    ok(`${t.id} stays in a range a speaker can render`, lo >= 21 && hi <= 100,
+      `MIDI ${lo}..${hi}`);
+    ok(`…and its loop is long enough not to nag`, (60 / t.bpm / t.stepsPerBeat) * t.steps >= 1.5,
+      `${((60 / t.bpm / t.stepsPerBeat) * t.steps).toFixed(1)}s`);
+  }
+}
+
 function pointLineDistance(p, a, b) {
   const dx = b.x - a.x;
   const dz = b.z - a.z;

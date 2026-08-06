@@ -20,6 +20,8 @@ export default defineLevel({
   name: 'Çam Halkası',
   subtitle: 'Pine Ring',
   theme: 'forest',
+  /** Dorian — warm minor with somewhere to go. @see src/audio/music/tracks/camHalkasi.js */
+  music: 'camHalkasi',
   race: { laps: 2, rivals: 3 },
 
   /**

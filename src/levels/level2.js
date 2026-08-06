@@ -21,6 +21,8 @@ export default defineLevel({
   name: 'Dere Geçidi',
   subtitle: 'Creek Crossing',
   theme: 'forest',
+  /** Mixolydian — bright, rolling, the b7 keeps it honest. @see src/audio/music/tracks/dereGecidi.js */
+  music: 'dereGecidi',
   race: { laps: 2, rivals: 3 },
 
   /**

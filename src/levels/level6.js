@@ -31,6 +31,8 @@ export default defineLevel({
   subtitle: 'The Viaduct',
   theme: 'mist',
   ambience: 'forest',
+  /** Lydian — the raised 4th is altitude and wonder. @see src/audio/music/tracks/viyaduk.js */
+  music: 'viyaduk',
   race: { laps: 2, rivals: 3 },
 
   map: {

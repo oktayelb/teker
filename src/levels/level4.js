@@ -28,6 +28,8 @@ export default defineLevel({
   subtitle: 'The Quarry',
   theme: 'dusk',
   ambience: 'outside',
+  /** Phrygian dominant — the augmented second is heat and dust. @see src/audio/music/tracks/tasocagi.js */
+  music: 'tasocagi',
   race: { laps: 2, rivals: 3 },
 
   map: {

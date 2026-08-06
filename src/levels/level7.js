@@ -27,6 +27,8 @@ export default defineLevel({
   subtitle: 'The Snow Line',
   theme: 'snow',
   ambience: 'outside',
+  /** Hirajoshi, iced with whole tone — stillness, and cold. @see src/audio/music/tracks/karHatti.js */
+  music: 'karHatti',
   race: { laps: 2, rivals: 3 },
 
   map: {

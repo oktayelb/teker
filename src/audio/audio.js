@@ -36,6 +36,7 @@
  */
 
 import { events } from '../core/events.js';
+import { MUSIC_TRACKS } from './music/index.js';
 import {
   chain,
   clamp,
@@ -501,7 +502,13 @@ export const AUDIO_CONFIG = {
   //
   // Patterns are arrays of semitone offsets from `root` (MIDI), or null for a
   // rest. Voices index their pattern independently (`step % pattern.length`),
-  // so different lengths give you free polymeter.
+  // so different lengths give you polymeter — as long as the track's `steps` is
+  // their common multiple, which is what `defineTrack` works out for itself.
+  //
+  // THE SONGS ARE NOT HERE. They live in `./music/`, one file each, written in
+  // scale degrees rather than semitones and compiled into the shape below at
+  // import time. Every level names its own; see `music/index.js` for the whole
+  // list and what to do to add one. Nothing in this file knows about keys.
   MUSIC: {
     /** Scheduler wake-up interval, ms. */
     schedulerMs: 25,
@@ -510,103 +517,8 @@ export const AUDIO_CONFIG = {
     /** Crossfade when switching tracks, seconds. */
     fadeSec: 1.1,
 
-    tracks: {
-      /** Title screen. Patient, minor, a bit too still. */
-      menu: {
-        bpm: 68,
-        stepsPerBeat: 2, // 8th notes
-        steps: 16,
-        root: 45, // A2
-        voices: {
-          pad: {
-            wave: 'sawtooth', octave: -1, detuneCents: 9, gain: 0.2,
-            attack: 1.4, hold: 2.2, release: 2.4, cutoffHz: 620, q: 0.8,
-            pattern: [0, null, null, null, null, null, null, null, 7, null, null, null, null, null, null, null],
-          },
-          bass: {
-            wave: 'square', octave: -2, detuneCents: 0, gain: 0.16,
-            attack: 0.006, hold: 0.1, release: 0.5, cutoffHz: 380, q: 2.0,
-            pattern: [0, null, null, null, null, null, null, null, 0, null, null, null, null, null, 5, null],
-          },
-          lead: {
-            wave: 'triangle', octave: 1, detuneCents: 0, gain: 0.13,
-            attack: 0.01, hold: 0.04, release: 0.85, cutoffHz: 2400, q: 1.0,
-            pattern: [null, null, 12, null, null, null, null, 15, null, null, null, null, 19, null, null, 12],
-          },
-        },
-      },
-
-      /** Racing. Forward motion, no melody to speak of. */
-      race: {
-        bpm: 132,
-        stepsPerBeat: 4, // 16ths
-        steps: 16,
-        root: 38, // D2
-        voices: {
-          bass: {
-            wave: 'sawtooth', octave: -1, detuneCents: 6, gain: 0.2,
-            attack: 0.004, hold: 0.03, release: 0.13, cutoffHz: 520, q: 3.0,
-            pattern: [0, null, 0, null, 0, null, 3, null, 0, null, 0, null, 5, null, 3, null],
-          },
-          perc: {
-            wave: 'noise', octave: 0, gain: 0.1,
-            attack: 0.001, hold: 0.0, release: 0.05, cutoffHz: 5200, q: 1.4,
-            pattern: [null, null, 0, null, null, null, 0, null, null, null, 0, null, null, 7, 0, null],
-          },
-          pad: {
-            wave: 'sawtooth', octave: 0, detuneCents: 11, gain: 0.09,
-            attack: 0.6, hold: 1.1, release: 1.4, cutoffHz: 900, q: 0.9,
-            pattern: [10, null, null, null, null, null, null, null, 8, null, null, null, null, null, null, null],
-          },
-        },
-      },
-
-      /** The chase. Faster, a semitone rubbing against itself. */
-      chase: {
-        bpm: 152,
-        stepsPerBeat: 4,
-        steps: 16,
-        root: 37, // C#2
-        voices: {
-          bass: {
-            wave: 'square', octave: -1, detuneCents: 0, gain: 0.22,
-            attack: 0.003, hold: 0.02, release: 0.1, cutoffHz: 640, q: 4.0,
-            pattern: [0, 0, null, 0, null, 0, 0, null, 1, null, 0, null, 0, 0, null, 11],
-          },
-          stab: {
-            wave: 'sawtooth', octave: 1, detuneCents: 18, gain: 0.11,
-            attack: 0.004, hold: 0.02, release: 0.22, cutoffHz: 1800, q: 5.0,
-            // 13 steps against 16: the two never line up, which is the point.
-            pattern: [0, null, null, 1, null, null, null, 0, null, null, 6, null, null],
-          },
-          perc: {
-            wave: 'noise', octave: 0, gain: 0.12,
-            attack: 0.001, hold: 0.0, release: 0.04, cutoffHz: 6400, q: 1.2,
-            pattern: [0, null, 0, 0, null, 0, null, 0, 0, null, 0, null, 0, 0, null, 0],
-          },
-        },
-      },
-
-      /** After. Almost nothing — just enough to prove the world still runs. */
-      alone: {
-        bpm: 48,
-        stepsPerBeat: 1, // quarter notes
-        steps: 8,
-        root: 41, // F2
-        voices: {
-          pad: {
-            wave: 'sawtooth', octave: -1, detuneCents: 5, gain: 0.18,
-            attack: 2.6, hold: 3.0, release: 3.4, cutoffHz: 420, q: 0.7,
-            pattern: [0, null, null, null, null, null, null, null],
-          },
-          lead: {
-            wave: 'sine', octave: 1, detuneCents: 0, gain: 0.1,
-            attack: 0.05, hold: 0.2, release: 2.0, cutoffHz: 1800, q: 0.8,
-            pattern: [null, null, null, 7, null, null, null, null, null, 12, null],
-          },
-        },
-      },
-    },
+    /** id → compiled track. @see ./music/index.js */
+    tracks: MUSIC_TRACKS,
   },
 
   /** Ducking: how far music+ambience drop under dialogue and stingers. */
@@ -1960,7 +1872,15 @@ export class AudioEngine {
   // Music
   // -------------------------------------------------------------------------
 
-  /** @param {'none'|'menu'|'race'|'chase'|'alone'} name */
+  /**
+   * Switch songs, crossfading over `MUSIC.fadeSec`. Safe before unlock — the
+   * name is remembered and the track starts on resume.
+   *
+   * @param {string} name any id in `./music/index.js`, or 'none'. Levels name
+   *   their own (`music:` in the level file); `menu`/`chase`/`alone` belong to
+   *   the game rather than to a stage. An unknown name is warned about once and
+   *   ignored, which leaves the previous track playing rather than going silent.
+   */
   setMusic(name) {
     const key = name || 'none';
     if (key === this._musicName) return;
