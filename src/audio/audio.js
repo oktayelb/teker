@@ -320,16 +320,6 @@ export const AUDIO_CONFIG = {
     },
   },
 
-  CHECKPOINT: {
-    /** Two quick rising blips. Cheerful but not congratulatory. */
-    hzA: 880,
-    hzB: 1320,
-    gapSec: 0.075,
-    dur: 0.1,
-    gain: 0.3,
-    wave: 'square',
-  },
-
   HORN: {
     /** Real horns are two tones a little apart; the beating IS the sound. */
     hzA: 415,
@@ -676,6 +666,8 @@ export class AudioEngine {
     this._ambienceName = 'none';
     this._amb = null;
     this._ambNextEvent = 0;
+    /** Event kinds the current situation doesn't want. @see muteAmbienceEvent */
+    this._ambMuted = new Set();
     this._musicName = 'none';
     this._music = null;
     this._schedTimer = null;
@@ -1302,13 +1294,6 @@ export class AudioEngine {
     this._blip(cfg);
   }
 
-  /** Checkpoint: two rising pips. Short enough to survive being spammed. */
-  playCheckpoint() {
-    const C = AUDIO_CONFIG.CHECKPOINT;
-    this._blip({ hz: C.hzA, wave: C.wave, dur: C.dur, gain: C.gain, cutoffHz: 6000 });
-    this._blip({ hz: C.hzB, wave: C.wave, dur: C.dur, gain: C.gain, cutoffHz: 8000, delay: C.gapSec });
-  }
-
   /**
    * Generic UI/pip voice. `hz2` slides the pitch (rising = confirm, falling =
    * back); when `wave` is a saw with hz2 close to hz, the two beat against each
@@ -1788,6 +1773,19 @@ export class AudioEngine {
     this._applyAmbience();
   }
 
+  /**
+   * Silence one kind of ambience event without changing the bed. The wind and
+   * drone of a forest still belong to a race; the birds sitting on top of it
+   * do not. Kept as a mute rather than a second preset so the bed keeps
+   * playing across the switch and nothing has to be re-authored.
+   * @param {'bird'|'cricket'|'swell'} kind
+   * @param {boolean} muted
+   */
+  muteAmbienceEvent(kind, muted = true) {
+    if (muted) this._ambMuted.add(kind);
+    else this._ambMuted.delete(kind);
+  }
+
   _applyAmbience() {
     this._teardownAmbience(AUDIO_CONFIG.AMBIENCE.fadeSec);
     const cfg = AUDIO_CONFIG.AMBIENCE[this._ambienceName];
@@ -1879,8 +1877,11 @@ export class AudioEngine {
     const E = amb.cfg.event;
     if (this._ambNextEvent < now) this._ambNextEvent = now + 0.05;
     let guard = AUDIO_CONFIG.AMBIENCE.maxEventsPerTick;
+    const muted = this._ambMuted.has(E.kind);
     while (this._ambNextEvent < horizon && guard-- > 0) {
-      this._spawnAmbienceEvent(E, this._ambNextEvent);
+      // Still walk the clock while muted, so unmuting picks up mid-rhythm
+      // instead of firing a backlog of birds the moment the race ends.
+      if (!muted) this._spawnAmbienceEvent(E, this._ambNextEvent);
       this._ambNextEvent += lerp(E.minGapSec, E.maxGapSec, this._rng());
     }
   }
@@ -2161,7 +2162,9 @@ export class AudioEngine {
     };
 
     sub('vehicle:collision', (p) => this.playCollision(num(p?.intensity, 0.5)));
-    sub('race:checkpoint', () => this.playCheckpoint());
+    // 'race:checkpoint' is intentionally not handled. Checkpoints are a safety
+    // net you cross constantly, so a pip on every one is a metronome, not
+    // feedback — the HUD already says where you are.
     sub('ui:blip', (p) => this.playUiBlip(p?.kind || 'move'));
     // 'camera:shake' is intentionally not handled: collisions already emit
     // 'vehicle:collision', and shaking for other reasons is a visual concern.

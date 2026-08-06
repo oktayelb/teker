@@ -233,6 +233,10 @@ export class RaceMode extends Mode {
     // The level says what its map sounds like. A night stage is not a forest
     // at noon, and neither is whatever the eighth one turns out to be.
     g.audio.setAmbience(this.level?.ambience || 'forest');
+    // Birds belong to the world, not to a race. Chirping over an engine at
+    // full throttle reads as a bug. The bed stays; only the birds go quiet,
+    // and `exit()` gives them back.
+    g.audio.muteAmbienceEvent('bird', true);
     g.audio.setMusic(this.level?.music ?? 'race');
     g.audio.startEngine();
 
@@ -292,6 +296,7 @@ export class RaceMode extends Mode {
     // Never hand a frozen car to the next mode — the breakout keeps the player
     // across the switch, and a mode torn down mid-countdown would strand it.
     this._setGridHold(false);
+    this.ctx.audio.muteAmbienceEvent('bird', false);
     for (const id of this._timers) clearTimeout(id);
     this._timers.length = 0;
     this.subs.dispose();
