@@ -97,6 +97,13 @@ export class Track {
     /** Unit right vector per sample. */
     this.rx = null;
     this.rz = null;
+    /**
+     * Rise per horizontal metre along the tangent — the road's own gradient.
+     * 0.2 is a 1-in-5 climb. This is what `World#sampleGround` builds the
+     * surface normal out of; without it the physics reads the *terrain's*
+     * normal, which under a viaduct is the valley floor. @see Track#normalAt
+     */
+    this.grade = null;
     this.halfWidth = null;
     this.curvature = null;
     /** Cumulative arc length, metres. */
@@ -194,6 +201,7 @@ export class Track {
     this.tz = new Float32Array(count);
     this.rx = new Float32Array(count);
     this.rz = new Float32Array(count);
+    this.grade = new Float32Array(count);
     this.halfWidth = new Float32Array(count);
     this.curvature = new Float32Array(count);
     this.arc = new Float32Array(count);
@@ -245,6 +253,9 @@ export class Track {
       dz /= len;
       this.tx[i] = dx;
       this.tz[i] = dz;
+      // Central difference, over the same two neighbours the tangent uses, so
+      // the gradient and the direction it is measured along cannot disagree.
+      this.grade[i] = (this.py[next] - this.py[prev]) / len;
       // Right-hand normal in the XZ plane, matching the vehicle's convention
       // (forward = (sin h, 0, cos h) → right = (cos h, 0, -sin h)).
       this.rx[i] = dz;
@@ -570,7 +581,7 @@ export class Track {
    * @param {number} [y] height of whoever is asking, if they have one
    * @returns {null | {index:number, dist:number, signedDist:number, height:number,
    *   halfWidth:number, surface:string, progress:number, onRoad:boolean,
-   *   deck:number, forwardX:number, forwardZ:number}}
+   *   deck:number, forwardX:number, forwardZ:number, grade:number}}
    */
   query(x, z, out = {}, y = null) {
     const candidates = this._grid.get(this._cellKey(x, z));
@@ -619,7 +630,41 @@ export class Track {
     out.deck = lerp(this.deck[best], this.deck[j], bestT);
     out.forwardX = this.tx[best];
     out.forwardZ = this.tz[best];
+    /**
+     * Interpolated across the segment, unlike the tangent above. A per-sample
+     * gradient read raw is a staircase, and a staircase in the *normal* is a
+     * car whose body flicks between two angles every four metres — which is
+     * what a climb read off the terrain heightfield used to look like.
+     */
+    out.grade = lerp(this.grade[best], this.grade[j], bestT);
     return out;
+  }
+
+  /**
+   * The road's own surface normal at a query result.
+   *
+   * The ribbon is not banked: it tilts along its length and nowhere else, so
+   * the normal falls straight out of the gradient and the horizontal tangent —
+   * (-tx·g, 1, -tz·g), normalised. That is worth having as a function rather
+   * than as three lines at the call site because the alternative, and what the
+   * physics did before, is to ask the *terrain* what the normal is.
+   *
+   * Asking the terrain is wrong in two ways that both show up as "the car will
+   * not sit on the road". Under a deck the terrain is the valley floor forty
+   * metres down, and its normal has nothing to do with the bridge — the car is
+   * tilted by scenery it is flying over, and gravity's in-plane component drags
+   * it sideways off a deck that is perfectly flat. On graded ground it is
+   * subtler and just as visible: the heightfield carries one sample every
+   * several metres, so a steep quarry climb is a coarse approximation of the
+   * smooth ribbon laid over it, and the car's attitude disagrees with the road
+   * you can see under its wheels.
+   *
+   * @param {{forwardX:number, forwardZ:number, grade:number}} q a `query` result
+   * @param {THREE.Vector3} out
+   */
+  normalAt(q, out) {
+    const g = q.grade || 0;
+    return out.set(-q.forwardX * g, 1, -q.forwardZ * g).normalize();
   }
 
   /**

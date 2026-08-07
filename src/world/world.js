@@ -47,6 +47,8 @@ import { clamp01, lerp, smoothstep } from '../core/mathx.js';
 import { events } from '../core/events.js';
 
 const _normal = new THREE.Vector3();
+/** The road's own normal, before it is blended into `_normal`. @see sampleGround */
+const _roadNormal = new THREE.Vector3();
 
 /**
  * How far below a deck still counts as standing on it, metres.
@@ -689,9 +691,17 @@ export class World {
       surface = 'TRAIL';
     }
 
-    // Roads override both height and surface. Using the ribbon's own elevation
-    // (rather than the coarse heightfield) is what keeps the tarmac glass-smooth
-    // while the terrain around it stays cheap.
+    // Roads override height, surface AND NORMAL. Using the ribbon's own
+    // elevation (rather than the coarse heightfield) is what keeps the tarmac
+    // glass-smooth while the terrain around it stays cheap — and the normal has
+    // to come from the same place as the height, or the car is standing on one
+    // surface and leaning on another. @see Track#normalAt
+    //
+    // `roadNormalWeight` is how much of the road's answer this point gets, and
+    // it is deliberately the SAME weight the height blend uses: full on the
+    // tarmac, fading to the terrain's own normal out across the verge. Blend
+    // them differently and you can feel the seam.
+    let roadNormalWeight = 0;
     const y = agent?.position?.y ?? null;
     for (const t of this._trackList) {
       const q = t.query(x, z, this._query, y);
@@ -710,6 +720,11 @@ export class World {
         if (y != null && y < deckY - DECK_REACH) continue;
         height = deckY;
         surface = q.surface;
+        // A deck stands over ground it has nothing to do with, so it takes the
+        // normal outright. There is no verge to blend into — off the edge is a
+        // fall, not a shoulder.
+        t.normalAt(q, _roadNormal);
+        roadNormalWeight = 1;
         break;
       }
 
@@ -718,6 +733,8 @@ export class World {
       if (q.dist > reach + 9) continue;
       const w = 1 - smoothstep(inner, inner + 9, q.dist);
       height = lerp(terrainH, q.height + ROAD.roadLift, w);
+      t.normalAt(q, _roadNormal);
+      roadNormalWeight = w;
       if (q.dist <= q.halfWidth) {
         surface = q.surface;
       } else if (q.runoff > 0 && q.dist <= q.halfWidth + q.runoff) {
@@ -741,6 +758,12 @@ export class World {
     }
 
     this.terrain.normalAt(x, z, _normal);
+    if (roadNormalWeight > 0) {
+      // `lerp` between two unit vectors is short; renormalising is what keeps
+      // it a direction rather than a slightly-squashed one.
+      if (roadNormalWeight >= 1) _normal.copy(_roadNormal);
+      else _normal.lerp(_roadNormal, roadNormalWeight).normalize();
+    }
 
     // The glass wins wherever it is above the earth. Highest-wins rather than a
     // replacement is what makes the rim seamless: the shell is sunk into the

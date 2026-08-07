@@ -2565,6 +2565,76 @@ section('17. every level is drivable, and the ones in the air hold you up');
   }
 }
 
+// -- the car sits on the road it is on ---------------------------------------
+//
+// `sampleGround` returns a height AND a normal, and for a long time only the
+// height came from the road: the normal was always the terrain's. That is two
+// bugs wearing one coat, and both of them present as "the car will not sit on
+// the ground where the road climbs".
+//
+//   On a DECK the terrain underneath is the valley floor, untouched, because
+//   `shapeTerrain` deliberately does not grade under a bridge. So a car on a
+//   flat viaduct was tilted by scenery forty metres below it — and worse, the
+//   in-plane component of gravity is taken from that normal, so it was shoved
+//   sideways along a deck that is level. Parked, hands off, it slid off.
+//
+//   On GRADED ground it is quieter and just as wrong: the heightfield carries
+//   one sample every several metres, so a steep quarry climb is a staircase
+//   approximation of the smooth ribbon lying on it, and the car's attitude
+//   flicks about while the road under its wheels is straight.
+//
+// What is asserted: on the tarmac, the physics normal is the ROAD's, and a car
+// left alone on a level piece of road stays where it was put. The numbers below
+// are what these levels measured before the fix — 70° of tilt on bölüm 4's
+// quarry, and 5 m/s of self-propelled drift on bölüm 9.
+{
+  const ZERO = { throttle: 0, brake: 0, steer: 0, handbrake: 0 };
+  for (const level of LEVELS) {
+    const w = await buildLevel(level.id, { scatter: false });
+    const t = w.mainTrack;
+    const q = {};
+    let worstTilt = 0;
+    let worstDrift = 0;
+    let flatSamples = 0;
+
+    const car = new Vehicle({ profile: 'rival', world: w, id: `sit-${level.id}` });
+    car.ignoreSurfaces = true;
+
+    for (let i = 0; i < t.count; i += 5) {
+      // The road's own normal, from its own gradient. Derived here from the
+      // sample arrays rather than from `Track#normalAt`, so this is a check and
+      // not a restatement of the thing being checked.
+      const pv = (i - 1 + t.count) % t.count;
+      const nx = (i + 1) % t.count;
+      const seg = Math.hypot(t.px[nx] - t.px[pv], t.pz[nx] - t.pz[pv]) || 1;
+      const grade = (t.py[nx] - t.py[pv]) / seg;
+      const rn = new THREE.Vector3(-t.tx[i] * grade, 1, -t.tz[i] * grade).normalize();
+
+      const g = w.sampleGround(t.px[i], t.pz[i], { position: new THREE.Vector3(t.px[i], t.py[i] + 0.5, t.pz[i]) });
+      const dot = Math.min(1, Math.max(-1, g.normal.dot(rn)));
+      worstTilt = Math.max(worstTilt, (Math.acos(dot) * 180) / Math.PI);
+
+      // …and the behaviour that follows from it. Only on the level stretches:
+      // a car on a hill is supposed to roll down the hill.
+      if (Math.abs(grade) >= 0.02) continue;
+      flatSamples++;
+      car.reset({ x: t.px[i], y: t.py[i] + 2, z: t.pz[i] }, Math.atan2(t.tx[i], t.tz[i]));
+      for (let s = 0; s < 90; s++) {
+        car.setCommand(ZERO);
+        car.fixedUpdate(DT);
+      }
+      const r = t.query(car.position.x, car.position.z, q, car.position.y);
+      if (r && r.onRoad) worstDrift = Math.max(worstDrift, Math.hypot(car.velocity.x, car.velocity.z));
+    }
+
+    ok(`${level.id}: the car leans the way the road does`, worstTilt < 3,
+      `worst ${worstTilt.toFixed(1)}° from the ribbon's own normal`);
+    ok(`…and parked on the level it stays parked`, worstDrift < 0.5,
+      `worst ${worstDrift.toFixed(2)}m/s over ${flatSamples} level samples`);
+    w.dispose();
+  }
+}
+
 // -- a road that passes over itself ------------------------------------------
 // The spiral on bölüm 6 comes down through its own shadow, which means two
 // pieces of road are at the same (x, z) and only their height tells them apart.
